@@ -267,60 +267,76 @@ var MovieBoxCatalog = (function () {
       });
     },
 
-    // 4. Stream Resolution (Multi-Server VIP 1080p)
+    // 4. Stream Resolution (Direct Native HD 1080p — No Iframes!)
     resolveStreams: function (type, imdbId, tmdbId, season, episode) {
+      var isSeries = (type === "series" || type === "tv");
       var s = season || 1;
       var e = episode || 1;
-      var qUrl = SERVICE_URL + "/api/resolve?type=" + (type === "series" ? "series" : "movie") +
+      var qUrl = SERVICE_URL + "/api/resolve?type=" + (isSeries ? "series" : "movie") +
                  "&imdb=" + encodeURIComponent(imdbId || "") +
                  "&tmdb=" + encodeURIComponent(tmdbId || "") +
                  "&s=" + s + "&e=" + e;
 
+      function clientFallback() {
+        var tmdbPromise = tmdbId
+          ? Promise.resolve(String(tmdbId))
+          : MovieBoxCatalog.getDetail(type, imdbId).then(function (det) {
+              return det && (det.moviedb_id || det.tmdb_id) ? String(det.moviedb_id || det.tmdb_id) : "";
+            });
+
+        return tmdbPromise.then(function (resolvedTmdb) {
+          if (!resolvedTmdb) return { ok: false, streams: [] };
+          var apiPath = isSeries
+            ? ("https://vixsrc.to/api/tv/" + encodeURIComponent(resolvedTmdb) + "/" + s + "/" + e)
+            : ("https://vixsrc.to/api/movie/" + encodeURIComponent(resolvedTmdb));
+          var pageRef = isSeries
+            ? ("https://vixsrc.to/tv/" + resolvedTmdb + "/" + s + "/" + e)
+            : ("https://vixsrc.to/movie/" + resolvedTmdb);
+
+          return fetch(apiPath, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (!j || !j.src) return { ok: false, streams: [] };
+              var embedUrl = j.src.indexOf("http") === 0 ? j.src : ("https://vixsrc.to" + j.src);
+              return fetch(embedUrl).then(function (r2) { return r2.text(); }).then(function (html) {
+                var tok = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
+                var exp = html.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
+                var mUrl = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
+                if (!tok || !exp || !mUrl) return { ok: false, streams: [] };
+
+                var rawM3u8 = mUrl[1] + "?token=" + encodeURIComponent(tok[1]) + "&expires=" + encodeURIComponent(exp[1]) + "&h=1&lang=en";
+                var proxyM3u8 = SERVICE_URL + "/proxy/stream?url=" + encodeURIComponent(rawM3u8) +
+                                "&ref=" + encodeURIComponent("https://vixsrc.to/") +
+                                "&origin=" + encodeURIComponent("https://vixsrc.to");
+
+                var streamItem = {
+                  server: "VIP Server 1",
+                  label: "MovieBox Direct FHD 1080p (Native)",
+                  quality: "1080p",
+                  url: proxyM3u8,
+                  rawUrl: rawM3u8,
+                  referer: "https://vixsrc.to/",
+                  origin: "https://vixsrc.to",
+                  headers: { Referer: "https://vixsrc.to/", Origin: "https://vixsrc.to" }
+                };
+
+                return {
+                  ok: true,
+                  streams: [streamItem],
+                  url: proxyM3u8
+                };
+              });
+            }).catch(function () {
+              return { ok: false, streams: [] };
+            });
+        });
+      }
+
       return getJson(qUrl).then(function (res) {
         if (res && res.ok && res.streams && res.streams.length > 0) return res;
-
-        // Construct Direct Multi-Server Embeds
-        var id = imdbId || tmdbId;
-        var embeds = [
-          {
-            server: "VIP Server 1 (VidLink Pro)",
-            label: "VidLink Pro 1080p",
-            url: type === "series"
-              ? ("https://vidlink.pro/tv/" + id + "/" + s + "/" + e + "?autoplay=true")
-              : ("https://vidlink.pro/movie/" + id + "?autoplay=true"),
-            type: "embed"
-          },
-          {
-            server: "VIP Server 2 (VidSrc Cloud)",
-            label: "VidSrc Cloud 1080p",
-            url: type === "series"
-              ? ("https://vidsrc.me/embed/tv?imdb=" + id + "&season=" + s + "&episode=" + e)
-              : ("https://vidsrc.me/embed/movie?imdb=" + id),
-            type: "embed"
-          },
-          {
-            server: "VIP Server 3 (AutoEmbed VIP)",
-            label: "AutoEmbed Multi-Source",
-            url: type === "series"
-              ? ("https://autoembed.co/tv/imdb/" + id + "-" + s + "-" + e)
-              : ("https://autoembed.co/movie/imdb/" + id),
-            type: "embed"
-          },
-          {
-            server: "VIP Server 4 (VidFast)",
-            label: "VidFast 1080p High-Speed",
-            url: type === "series"
-              ? ("https://vidfast.vc/tv/" + id + "/" + s + "/" + e + "?autoPlay=true")
-              : ("https://vidfast.vc/movie/" + id + "?autoPlay=true"),
-            type: "embed"
-          }
-        ];
-
-        return {
-          ok: true,
-          streams: (res && res.streams) || [],
-          embeds: embeds
-        };
+        return clientFallback();
+      }).catch(function () {
+        return clientFallback();
       });
     },
 

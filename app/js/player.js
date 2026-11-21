@@ -1,16 +1,16 @@
 /**
- * MovieBox (Morphe Edition) — Fullscreen Hardware Video Player
- * Supports Hls.js, Dash.js, HTML5 video, automatic 1080p level selection,
- * Arabic & English subtitle renderer, and Samsung TV remote keybindings.
+ * MovieBox (Morphe Edition) — Native TV Hardware Video Player
+ * Direct Native HD Streaming via Hls.js & Port 8088 Header Proxy (No Iframes!)
+ * Automatic 1080p Full HD selection, Arabic & English subtitles cue renderer,
+ * and complete Samsung TV remote keybindings.
  */
 var MovieBoxPlayer = (function () {
   var video = null;
   var osd = null;
   var hls = null;
-  var dash = null;
   var osdTimeout = null;
   var currentMeta = null;
-  var activeSubTrack = null;
+  var noticeTimeout = null;
 
   var state = {
     isOpen: false,
@@ -20,6 +20,8 @@ var MovieBoxPlayer = (function () {
     levels: [],
     currentLevel: -1,
     subtitles: [],
+    activeSubIdx: -1,
+    loadedSubTracks: [], // { label, lang, cues: [{start, end, text}] }
     servers: [],
     activeServerIndex: 0
   };
@@ -42,6 +44,10 @@ var MovieBoxPlayer = (function () {
     return mStr + ":" + sStr;
   }
 
+  function say(msg) {
+    MovieBoxApp.toast(msg);
+  }
+
   function init() {
     video = el("player-video");
     osd = el("player-osd");
@@ -52,42 +58,61 @@ var MovieBoxPlayer = (function () {
     video.addEventListener("durationchange", onDurationChange);
     video.addEventListener("play", function () {
       state.isPlaying = true;
-      el("pchip-play").textContent = "⏸ Pause";
+      var playBtn = el("pchip-play");
+      if (playBtn) playBtn.textContent = "⏸ Pause";
     });
     video.addEventListener("pause", function () {
       state.isPlaying = false;
-      el("pchip-play").textContent = "▶ Play";
+      var playBtn = el("pchip-play");
+      if (playBtn) playBtn.textContent = "▶ Play";
     });
 
     // OSD Interactions
-    el("osd-back-btn").addEventListener("click", close);
-    el("pchip-play").addEventListener("click", togglePlay);
-    el("pchip-quality").addEventListener("click", showQualityPicker);
-    el("pchip-subs").addEventListener("click", showSubtitlesPicker);
-    el("pchip-server").addEventListener("click", showServerPicker);
+    var backBtn = el("osd-back-btn");
+    if (backBtn) backBtn.addEventListener("click", close);
+
+    var playBtn = el("pchip-play");
+    if (playBtn) playBtn.addEventListener("click", togglePlay);
+
+    var qualBtn = el("pchip-quality");
+    if (qualBtn) qualBtn.addEventListener("click", showQualityPicker);
+
+    var subBtn = el("pchip-subs");
+    if (subBtn) subBtn.addEventListener("click", showSubtitlesPicker);
+
+    var srvBtn = el("pchip-server");
+    if (srvBtn) srvBtn.addEventListener("click", showServerPicker);
 
     // Seekbar click / seek
-    el("osd-seekbar").addEventListener("click", function (e) {
-      var rect = e.currentTarget.getBoundingClientRect();
-      var pos = (e.clientX - rect.left) / rect.width;
-      if (video.duration) {
-        video.currentTime = pos * video.duration;
-      }
-    });
+    var seekbar = el("osd-seekbar");
+    if (seekbar) {
+      seekbar.addEventListener("click", function (e) {
+        var rect = e.currentTarget.getBoundingClientRect();
+        var pos = (e.clientX - rect.left) / rect.width;
+        if (video.duration) {
+          video.currentTime = pos * video.duration;
+        }
+      });
+    }
   }
 
   function onTimeUpdate() {
     if (!video) return;
     state.currentTime = video.currentTime;
-    el("osd-cur-time").textContent = formatTime(state.currentTime);
+    var curEl = el("osd-cur-time");
+    if (curEl) curEl.textContent = formatTime(state.currentTime);
 
     var dur = video.duration || state.duration || 1;
     var pct = (state.currentTime / dur) * 100;
-    el("osd-seek-played").style.width = pct + "%";
-    el("osd-seek-thumb").style.left = pct + "%";
+    var played = el("osd-seek-played");
+    if (played) played.style.width = pct + "%";
+    var thumb = el("osd-seek-thumb");
+    if (thumb) thumb.style.left = pct + "%";
+
+    updateSubtitleDisplay();
 
     // Periodically save resume position
-    if (currentMeta && Math.floor(state.currentTime) % 10 === 0) {
+    if (currentMeta && Math.floor(state.currentTime) % 10 === 0 && state.currentTime > 5) {
       MovieBoxCatalog.saveHistory({
         id: currentMeta.id,
         type: currentMeta.type,
@@ -104,7 +129,8 @@ var MovieBoxPlayer = (function () {
   function onDurationChange() {
     if (!video) return;
     state.duration = video.duration;
-    el("osd-dur-time").textContent = formatTime(state.duration);
+    var durEl = el("osd-dur-time");
+    if (durEl) durEl.textContent = formatTime(state.duration);
   }
 
   function showOsd() {
@@ -124,22 +150,26 @@ var MovieBoxPlayer = (function () {
       if (state.isPlaying) {
         hideOsd();
       }
-    }, 5000);
+    }, 4500);
   }
 
   function togglePlay() {
     if (!video) return;
     if (video.paused) {
       video.play().catch(function () {});
+      say("▶ Playing");
     } else {
       video.pause();
+      say("⏸ Paused");
     }
     showOsd();
   }
 
   function seek(delta) {
     if (!video) return;
-    video.currentTime = Math.max(0, Math.min(video.currentTime + delta, video.duration || 0));
+    var target = Math.max(0, Math.min(video.currentTime + delta, (video.duration || 10000) - 1));
+    video.currentTime = target;
+    say((delta > 0 ? "↻ +" : "↺ ") + delta + "s (" + formatTime(target) + ")");
     showOsd();
   }
 
@@ -148,11 +178,8 @@ var MovieBoxPlayer = (function () {
       try { hls.destroy(); } catch (e) {}
       hls = null;
     }
-    if (dash) {
-      try { dash.reset(); } catch (e) {}
-      dash = null;
-    }
     if (video) {
+      video.pause();
       video.removeAttribute("src");
       video.load();
     }
@@ -162,52 +189,60 @@ var MovieBoxPlayer = (function () {
     currentMeta = itemMeta;
     state.activeServerIndex = serverIndex || 0;
     state.isOpen = true;
+    state.activeSubIdx = -1;
+    state.loadedSubTracks = [];
 
-    el("player-layer").classList.add("open");
-    el("osd-title").textContent = itemMeta.name || "MovieBox";
-    if (itemMeta.type === "series") {
-      var sStr = (itemMeta.season < 10 ? "0" : "") + (itemMeta.season || 1);
-      var eStr = (itemMeta.episode < 10 ? "0" : "") + (itemMeta.episode || 1);
-      el("osd-subtitle").textContent = "S" + sStr + "E" + eStr;
-    } else {
-      el("osd-subtitle").textContent = itemMeta.year || "";
+    var layer = el("player-layer");
+    if (layer) layer.classList.add("open");
+
+    var titleEl = el("osd-title");
+    if (titleEl) titleEl.textContent = itemMeta.name || "MovieBox";
+
+    var subEl = el("osd-subtitle");
+    if (subEl) {
+      if (itemMeta.type === "series") {
+        var sStr = (itemMeta.season < 10 ? "0" : "") + (itemMeta.season || 1);
+        var eStr = (itemMeta.episode < 10 ? "0" : "") + (itemMeta.episode || 1);
+        subEl.textContent = "Season " + (itemMeta.season || 1) + " · Episode " + (itemMeta.episode || 1);
+      } else {
+        subEl.textContent = itemMeta.year || "Movie (1080p FHD)";
+      }
     }
 
     destroyEngines();
     showOsd();
 
-    // Check if we have direct HLS streams or embed
-    if (itemMeta.streamUrl) {
-      playStream(itemMeta.streamUrl);
-    } else {
-      // Resolve streams dynamically
-      MovieBoxApp.toast("Resolving 1080p stream for " + itemMeta.name + "…");
-      MovieBoxCatalog.resolveStreams(itemMeta.type, itemMeta.id, itemMeta.tmdb, itemMeta.season, itemMeta.episode)
-        .then(function (res) {
-          if (res && res.streams && res.streams.length > 0) {
-            state.servers = res.streams.concat(res.embeds || []);
-            var best = res.streams[0];
-            playStream(best.url);
-          } else if (res && res.embeds && res.embeds.length > 0) {
-            state.servers = res.embeds;
-            openEmbedFallback(res.embeds[0].url);
-          } else {
-            MovieBoxApp.toast("No stream available, try another server");
-          }
-        });
-    }
+    say("Resolving Direct HD stream for " + itemMeta.name + "…");
+
+    // Resolve direct native stream
+    MovieBoxCatalog.resolveStreams(itemMeta.type, itemMeta.id, itemMeta.tmdb, itemMeta.season, itemMeta.episode)
+      .then(function (res) {
+        if (res && res.streams && res.streams.length > 0) {
+          state.servers = res.streams;
+          var best = res.streams[0];
+          playStream(best.url, best.rawUrl);
+        } else {
+          say("Stream resolution failed. Please try again.");
+        }
+      })
+      .catch(function (err) {
+        console.error("Resolve error:", err);
+        say("Failed to resolve stream");
+      });
 
     // Auto-fetch Arabic and English Subtitles
     fetchSubtitles(itemMeta.id, itemMeta.season, itemMeta.episode);
   }
 
-  function playStream(url) {
+  function playStream(url, fallbackRawUrl) {
+    if (!video) return;
+
     if (window.Hls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
-        startLevel: -1 // auto level
+        startLevel: -1
       });
 
       hls.loadSource(url);
@@ -218,8 +253,7 @@ var MovieBoxPlayer = (function () {
 
         // 🌟 FORCE 1080p FHD: Automatically select highest quality level!
         if (state.levels.length > 0) {
-          var targetLevel = state.levels.length - 1; // highest level in playlist
-          // Find 1080p level if available
+          var targetLevel = state.levels.length - 1;
           for (var i = state.levels.length - 1; i >= 0; i--) {
             if (state.levels[i].height >= 1080) {
               targetLevel = i;
@@ -227,19 +261,38 @@ var MovieBoxPlayer = (function () {
             }
           }
           hls.currentLevel = targetLevel;
-          var h = state.levels[targetLevel].height;
-          el("pchip-quality").querySelector(".pchip-val").textContent = (h ? h + "p" : "1080p") + " FHD ✓";
+          var h = state.levels[targetLevel].height || 1080;
+          var qVal = el("pchip-quality");
+          if (qVal) {
+            var valEl = qVal.querySelector(".pchip-val");
+            if (valEl) valEl.textContent = h + "p FHD ✓";
+          }
+        }
+
+        // Resume position if stored
+        var hist = MovieBoxCatalog.getHistory();
+        var saved = null;
+        for (var hi = 0; hi < hist.length; hi++) {
+          if (hist[hi].id === currentMeta.id) { saved = hist[hi]; break; }
+        }
+        if (saved && saved.time > 10 && saved.time < (saved.duration || 10000) - 30) {
+          video.currentTime = saved.time;
+          say("Resumed at " + formatTime(saved.time));
         }
 
         video.play().catch(function () {});
+        resetOsdTimer();
       });
 
       hls.on(Hls.Events.ERROR, function (ev, data) {
         if (data && data.fatal) {
-          console.error("HLS Fatal error:", data);
-          MovieBoxApp.toast("Stream error. Switching to fallback server…");
-          if (state.servers.length > 1) {
-            switchServer(1);
+          console.warn("HLS Error encountered, trying fallback:", data);
+          if (fallbackRawUrl && fallbackRawUrl !== url) {
+            say("Switching to direct stream link…");
+            destroyEngines();
+            playStream(fallbackRawUrl, null);
+          } else {
+            say("Stream error. Please select another title or try again.");
           }
         }
       });
@@ -249,15 +302,58 @@ var MovieBoxPlayer = (function () {
     }
   }
 
-  function openEmbedFallback(url) {
-    close();
-    el("browser-iframe").src = url;
-    el("browser-layer").classList.add("open");
+  // --- Subtitle Cue Parser & Renderer ---
+  function parseSubCues(rawText) {
+    var cues = [];
+    var text = String(rawText || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    var blocks = text.split(/\n\s*\n/);
+    var timeRe = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{3})/;
+    for (var i = 0; i < blocks.length; i++) {
+      var lines = blocks[i].trim().split("\n");
+      var tIdx = -1;
+      var match = null;
+      for (var j = 0; j < Math.min(3, lines.length); j++) {
+        match = timeRe.exec(lines[j]);
+        if (match) { tIdx = j; break; }
+      }
+      if (tIdx < 0 || !match) continue;
+      var start = (Number(match[1] || 0) * 3600) + (Number(match[2]) * 60) + Number(match[3]) + (Number(match[4]) / 1000);
+      var end = (Number(match[5] || 0) * 3600) + (Number(match[6]) * 60) + Number(match[7]) + (Number(match[8]) / 1000);
+      var cueText = lines.slice(tIdx + 1).join("\n").replace(/<[^>]+>/g, "").trim();
+      if (cueText) {
+        cues.push({ start: start, end: end, text: cueText });
+      }
+    }
+    return cues;
+  }
+
+  function updateSubtitleDisplay() {
+    var subBox = el("player-subtitle-text");
+    if (!subBox) return;
+    if (state.activeSubIdx < 0 || !state.loadedSubTracks[state.activeSubIdx]) {
+      subBox.style.display = "none";
+      return;
+    }
+    var t = video.currentTime;
+    var cues = state.loadedSubTracks[state.activeSubIdx].cues || [];
+    var matched = "";
+    for (var i = 0; i < cues.length; i++) {
+      if (t >= cues[i].start && t <= cues[i].end) {
+        matched = cues[i].text;
+        break;
+      }
+    }
+    if (matched) {
+      subBox.innerHTML = matched.replace(/\n/g, "<br/>");
+      subBox.style.display = "inline-block";
+    } else {
+      subBox.style.display = "none";
+    }
   }
 
   function fetchSubtitles(imdbId, season, episode) {
     if (!imdbId) return;
-    var qUrl = "http://127.0.0.1:8087/api/subs?imdb=" + encodeURIComponent(imdbId) +
+    var qUrl = "http://127.0.0.1:8088/api/subs?imdb=" + encodeURIComponent(imdbId) +
                "&lang=ara,eng" +
                (season ? ("&s=" + season) : "") +
                (episode ? ("&e=" + episode) : "");
@@ -275,47 +371,44 @@ var MovieBoxPlayer = (function () {
             if (s.lang === "eng" && !engSub) engSub = s;
           });
 
-          // Set default sub
+          // Set default sub (Arabic preferred, else English)
           var chosen = araSub || engSub;
           if (chosen) {
-            setSubtitleTrack(chosen);
+            loadSubtitleTrack(chosen, true);
           }
         }
       })
       .catch(function () {});
   }
 
-  function setSubtitleTrack(subObj) {
-    if (!subObj) {
-      if (activeSubTrack) {
-        activeSubTrack.mode = "disabled";
-      }
-      el("pchip-subs").querySelector(".pchip-val").textContent = "Off";
-      return;
-    }
-
-    // Remove existing tracks
-    var existingTracks = video.querySelectorAll("track");
-    existingTracks.forEach(function (t) { t.remove(); });
-
-    var track = document.createElement("track");
-    track.kind = "subtitles";
-    track.label = subObj.langName || subObj.lang;
-    track.srclang = subObj.lang;
-    track.src = subObj.vttUrl;
-    track.default = true;
-
-    video.appendChild(track);
-    track.mode = "showing";
-    activeSubTrack = track;
-
-    el("pchip-subs").querySelector(".pchip-val").textContent = (subObj.langName || subObj.lang) + " ✓";
-    MovieBoxApp.toast("Subtitles: " + (subObj.langName || subObj.lang));
+  function loadSubtitleTrack(subObj, makeActive) {
+    if (!subObj || !subObj.vttUrl) return;
+    fetch(subObj.vttUrl)
+      .then(function (r) { return r.text(); })
+      .then(function (rawVtt) {
+        var cues = parseSubCues(rawVtt);
+        var trackObj = {
+          label: (subObj.lang === "ara" ? "🇸🇦 Arabic" : "🇬🇧 English"),
+          lang: subObj.lang,
+          cues: cues
+        };
+        state.loadedSubTracks.push(trackObj);
+        if (makeActive) {
+          state.activeSubIdx = state.loadedSubTracks.length - 1;
+          var subChip = el("pchip-subs");
+          if (subChip) {
+            var valEl = subChip.querySelector(".pchip-val");
+            if (valEl) valEl.textContent = trackObj.label + " ✓";
+          }
+          say("Subtitles: " + trackObj.label);
+        }
+      })
+      .catch(function () {});
   }
 
   function showQualityPicker() {
     if (!hls || !state.levels || state.levels.length === 0) {
-      MovieBoxApp.toast("Quality controlled by source (1080p FHD)");
+      say("Quality: 1080p FHD (Source Locked)");
       return;
     }
 
@@ -324,19 +417,22 @@ var MovieBoxPlayer = (function () {
         label: "Auto (Adaptive)",
         action: function () {
           hls.currentLevel = -1;
-          el("pchip-quality").querySelector(".pchip-val").textContent = "Auto";
+          var qVal = el("pchip-quality");
+          if (qVal) qVal.querySelector(".pchip-val").textContent = "Auto";
+          say("Quality set to Auto");
         }
       }
     ];
 
     state.levels.forEach(function (lvl, idx) {
-      var h = lvl.height || (idx === state.levels.length - 1 ? 1080 : 720);
+      var h = lvl.height || 1080;
       items.push({
         label: h >= 2160 ? "4K UHD" : (h + "p " + (h >= 1080 ? "FHD" : "HD")),
         action: function () {
           hls.currentLevel = idx;
-          el("pchip-quality").querySelector(".pchip-val").textContent = h + "p FHD ✓";
-          MovieBoxApp.toast("Locked to " + h + "p FHD");
+          var qVal = el("pchip-quality");
+          if (qVal) qVal.querySelector(".pchip-val").textContent = h + "p FHD ✓";
+          say("Quality locked to " + h + "p");
         }
       });
     });
@@ -347,61 +443,101 @@ var MovieBoxPlayer = (function () {
   function showSubtitlesPicker() {
     var items = [
       {
-        label: "Off",
+        label: "Off (Disable Subtitles)",
         action: function () {
-          setSubtitleTrack(null);
+          state.activeSubIdx = -1;
+          var subBox = el("player-subtitle-text");
+          if (subBox) subBox.style.display = "none";
+          var subChip = el("pchip-subs");
+          if (subChip) subChip.querySelector(".pchip-val").textContent = "Off";
+          say("Subtitles: Off");
         }
       }
     ];
 
-    state.subtitles.forEach(function (sb) {
+    state.loadedSubTracks.forEach(function (track, idx) {
       items.push({
-        label: (sb.lang === "ara" ? "🇸🇦 " : "🇬🇧 ") + sb.langName + " (" + sb.name.slice(0, 35) + "…)",
+        label: track.label + (state.activeSubIdx === idx ? "  ✓" : ""),
         action: function () {
-          setSubtitleTrack(sb);
+          state.activeSubIdx = idx;
+          var subChip = el("pchip-subs");
+          if (subChip) subChip.querySelector(".pchip-val").textContent = track.label + " ✓";
+          say("Subtitles: " + track.label);
         }
       });
+    });
+
+    state.subtitles.forEach(function (sb) {
+      var alreadyLoaded = state.loadedSubTracks.some(function (lt) { return lt.lang === sb.lang; });
+      if (!alreadyLoaded) {
+        items.push({
+          label: (sb.lang === "ara" ? "🇸🇦 " : "🇬🇧 ") + sb.langName,
+          action: function () {
+            loadSubtitleTrack(sb, true);
+          }
+        });
+      }
     });
 
     MovieBoxApp.showModal("Subtitles (Arabic / English)", items);
   }
 
   function showServerPicker() {
-    if (!state.servers || state.servers.length === 0) return;
+    if (!state.servers || state.servers.length === 0) {
+      say("No alternative servers available");
+      return;
+    }
     var items = state.servers.map(function (srv, idx) {
       return {
-        label: "⚡ " + (srv.label || srv.server),
+        label: "⚡ " + (srv.label || ("Server " + (idx + 1))),
         action: function () {
           switchServer(idx);
         }
       };
     });
-    MovieBoxApp.showModal("Select Streaming Server", items);
+    MovieBoxApp.showModal("Select Direct Streaming Server", items);
   }
 
   function switchServer(idx) {
     if (!state.servers[idx]) return;
     state.activeServerIndex = idx;
     var srv = state.servers[idx];
-    el("pchip-server").querySelector(".pchip-val").textContent = "Server " + (idx + 1);
-    if (srv.type === "embed") {
-      openEmbedFallback(srv.url);
-    } else {
-      destroyEngines();
-      playStream(srv.url);
-    }
+    var srvChip = el("pchip-server");
+    if (srvChip) srvChip.querySelector(".pchip-val").textContent = "Server " + (idx + 1);
+    destroyEngines();
+    playStream(srv.url, srv.rawUrl);
   }
 
   function close() {
     state.isOpen = false;
+    if (video && currentMeta && video.currentTime > 5) {
+      MovieBoxCatalog.saveHistory({
+        id: currentMeta.id,
+        type: currentMeta.type,
+        name: currentMeta.name,
+        poster: currentMeta.poster,
+        season: currentMeta.season || 1,
+        episode: currentMeta.episode || 1,
+        time: video.currentTime,
+        duration: video.duration || state.duration || 1
+      });
+    }
     destroyEngines();
-    el("player-layer").classList.remove("open");
+    var subBox = el("player-subtitle-text");
+    if (subBox) subBox.style.display = "none";
+    var layer = el("player-layer");
+    if (layer) layer.classList.remove("open");
+  }
+
+  function isOpen() {
+    return state.isOpen;
   }
 
   return {
     init: init,
     open: open,
     close: close,
+    isOpen: isOpen,
     togglePlay: togglePlay,
     seek: seek,
     showOsd: showOsd

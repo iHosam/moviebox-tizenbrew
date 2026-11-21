@@ -91,12 +91,13 @@ function fetchBuffer(targetUrl, options, callback) {
     var isHttps = parsed.protocol === 'https:';
     var client = isHttps ? https : http;
 
-    var headers = {};
-    headers['User-Agent'] = options.ua || CHROME_UA;
-    headers['Accept'] = options.accept || '*/*';
-    headers['Accept-Encoding'] = 'gzip, deflate';
-    if (options.referer) headers['Referer'] = options.referer;
-    if (options.origin) headers['Origin'] = options.origin;
+    var headers = Object.assign({}, options.headers || {});
+    if (!headers['User-Agent']) headers['User-Agent'] = options.ua || CHROME_UA;
+    if (!headers['Accept']) headers['Accept'] = options.accept || '*/*';
+    if (!headers['Accept-Encoding']) headers['Accept-Encoding'] = 'gzip, deflate';
+    if (options.referer && !headers['Referer']) headers['Referer'] = options.referer;
+    if (options.origin && !headers['Origin']) headers['Origin'] = options.origin;
+    if (options.cookie && !headers['Cookie']) headers['Cookie'] = options.cookie;
 
     var reqOpts = {
         hostname: parsed.hostname,
@@ -262,7 +263,7 @@ var server = http.createServer(function (req, res) {
                         line = line.replace(/URI="([^"]+)"/g, function (match, rawUri) {
                             var resolved = urlModule.resolve(baseUrl, rawUri);
                             var q = 'url=' + encodeURIComponent(resolved) + '&ref=' + encodeURIComponent(ref) + '&origin=' + encodeURIComponent(orig);
-                            return 'URI="/proxy/stream?' + q + '"';
+                            return 'URI="http://127.0.0.1:' + PORT + '/proxy/stream?' + q + '"';
                         });
                         out.push(line);
                         continue;
@@ -276,7 +277,7 @@ var server = http.createServer(function (req, res) {
                     // Video/Audio Chunk URL line
                     var chunkResolved = urlModule.resolve(baseUrl, line);
                     var chunkQ = 'url=' + encodeURIComponent(chunkResolved) + '&ref=' + encodeURIComponent(ref) + '&origin=' + encodeURIComponent(orig);
-                    out.push('/proxy/stream?' + chunkQ);
+                    out.push('http://127.0.0.1:' + PORT + '/proxy/stream?' + chunkQ);
                 }
 
                 var rewritten = out.join('\n');
@@ -320,13 +321,14 @@ var server = http.createServer(function (req, res) {
                 ? ('https://vixsrc.to/tv/' + finalTmdb + '/' + rSeason + '/' + rEpisode)
                 : ('https://vixsrc.to/movie/' + finalTmdb);
 
-            fetchBuffer(vixUrl, { referer: vixRef, ua: CHROME_UA, timeout: 5000 }, function (err1, buf1) {
+            fetchBuffer(vixUrl, { referer: vixRef, ua: CHROME_UA, timeout: 8000 }, function (err1, buf1, status1, headers1) {
                 if (!err1 && buf1) {
                     try {
                         var j1 = JSON.parse(buf1.toString('utf8'));
                         if (j1 && j1.src) {
+                            var cookies = (headers1 && headers1['set-cookie'] || []).map(function (c) { return c.split(';')[0]; }).join('; ');
                             var embedUrl = urlModule.resolve('https://vixsrc.to', j1.src);
-                            fetchBuffer(embedUrl, { referer: vixRef, ua: CHROME_UA, timeout: 5000 }, function (err2, buf2) {
+                            fetchBuffer(embedUrl, { referer: vixRef, cookie: cookies, ua: CHROME_UA, timeout: 8000 }, function (err2, buf2) {
                                 if (!err2 && buf2) {
                                     var html = buf2.toString('utf8');
                                     var tok = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
@@ -334,11 +336,15 @@ var server = http.createServer(function (req, res) {
                                     var mUrl = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
                                     if (tok && exp && mUrl) {
                                         var m3u8 = mUrl[1] + "?token=" + encodeURIComponent(tok[1]) + "&expires=" + encodeURIComponent(exp[1]) + "&h=1&lang=en";
+                                        var proxyM3u8 = 'http://127.0.0.1:' + PORT + '/proxy/stream?url=' + encodeURIComponent(m3u8) +
+                                                        '&ref=' + encodeURIComponent('https://vixsrc.to/') +
+                                                        '&origin=' + encodeURIComponent('https://vixsrc.to');
                                         streams.push({
                                             server: "VIP Server 1",
-                                            label: "MovieBox VIP 1 (1080p/720p)",
+                                            label: "MovieBox Direct FHD 1080p (Native)",
                                             quality: "1080p",
-                                            url: m3u8,
+                                            url: proxyM3u8,
+                                            rawUrl: m3u8,
                                             referer: "https://vixsrc.to/",
                                             origin: "https://vixsrc.to",
                                             headers: { Referer: "https://vixsrc.to/", Origin: "https://vixsrc.to" }
@@ -355,31 +361,12 @@ var server = http.createServer(function (req, res) {
             });
 
             function finishResponse() {
-                // Add VidLink Pro & AutoEmbed embed options
-                var vidLinkUrl = rType === 'series'
-                    ? ('https://vidlink.pro/tv/' + (rImdb || finalTmdb) + '/' + rSeason + '/' + rEpisode + '?autoplay=true')
-                    : ('https://vidlink.pro/movie/' + (rImdb || finalTmdb) + '?autoplay=true');
-
-                var autoEmbedUrl = rType === 'series'
-                    ? ('https://autoembed.co/tv/imdb/' + (rImdb || finalTmdb) + '-' + rSeason + '-' + rEpisode)
-                    : ('https://autoembed.co/movie/imdb/' + (rImdb || finalTmdb));
-
-                var vidSrcUrl = rType === 'series'
-                    ? ('https://vidsrc.me/embed/tv?imdb=' + (rImdb || finalTmdb) + '&season=' + rSeason + '&episode=' + rEpisode)
-                    : ('https://vidsrc.me/embed/movie?imdb=' + (rImdb || finalTmdb));
-
-                var embedServers = [
-                    { server: "VIP Server 2", label: "VidLink Pro HD (1080p)", url: vidLinkUrl, type: "embed" },
-                    { server: "VIP Server 3", label: "VidSrc Cloud (1080p)", url: vidSrcUrl, type: "embed" },
-                    { server: "VIP Server 4", label: "AutoEmbed Multi (1080p)", url: autoEmbedUrl, type: "embed" }
-                ];
-
                 return sendJson(res, 200, {
-                    ok: streams.length > 0 || embedServers.length > 0,
+                    ok: streams.length > 0,
                     tmdb: finalTmdb,
                     imdb: rImdb,
-                    streams: streams,
-                    embeds: embedServers
+                    url: streams.length > 0 ? streams[0].url : "",
+                    streams: streams
                 });
             }
         }

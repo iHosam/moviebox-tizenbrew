@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>MovieBox — Morphe Edition (Samsung Tizen TV)</title>
-  <link rel="stylesheet" href="css/style.css?v=2" />
+  <link rel="stylesheet" href="css/style.css?v=3" />
   <!-- Hardware video playback engines for Tizen WebEngine -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
@@ -68,7 +68,9 @@
   <div id="player-layer" class="fullscreen-layer">
     <div id="player-video-wrap">
       <video id="player-video" preload="auto" playsinline></video>
-      <div id="player-subtitles-box"></div>
+      <div id="player-subtitles-box">
+        <span id="player-subtitle-text" style="display: none;"></span>
+      </div>
     </div>
 
     <!-- Player Controls Overlay (OSD) -->
@@ -115,29 +117,6 @@
     </div>
   </div>
 
-  <!-- In-App Embed Browser Layer (Fallback Player) -->
-  <div id="browser-layer" class="fullscreen-layer">
-    <div id="browser-topbar">
-      <div id="browser-back-btn" class="browser-btn focusable" tabindex="0">← Back to MovieBox</div>
-      <div id="browser-site-title">MovieBox Embed Player</div>
-      <div class="browser-spacer"></div>
-      <div id="browser-pointer-btn" class="browser-btn accent focusable" tabindex="0">🖱 Pointer (Green)</div>
-      <div id="browser-reload-btn" class="browser-btn focusable" tabindex="0">↻ Reload</div>
-    </div>
-    <div id="browser-frame-wrap">
-      <iframe
-        id="browser-iframe"
-        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-        allowfullscreen
-        referrerpolicy="origin"
-        src="about:blank"
-      ></iframe>
-    </div>
-  </div>
-
-  <!-- Virtual D-pad Pointer Dot for In-App Browser -->
-  <div id="virtual-pointer"></div>
-
   <!-- Generic List / Selection Modal -->
   <div id="list-modal" class="modal-layer">
     <div class="list-modal-box">
@@ -151,8 +130,8 @@
   <div id="toast"></div>
 
   <!-- Scripts -->
-  <script src="js/catalog.js?v=2"></script>
-  <script src="js/player.js?v=2"></script>
-  <script src="js/app.js?v=2"></script>
+  <script src="js/catalog.js?v=3"></script>
+  <script src="js/player.js?v=3"></script>
+  <script src="js/app.js?v=3"></script>
 </body>
 </html>
