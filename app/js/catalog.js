@@ -4,7 +4,8 @@
  */
 var MovieBoxCatalog = (function () {
   var CINEMETA = "https://v3-cinemeta.strem.io";
-  var SERVICE_URL = "http://127.0.0.1:8088";
+  var SERVICE_PORTS = [8088, 8087, 8089];
+  var cachedServiceUrl = null;
 
   function getJson(url) {
     return fetch(url)
@@ -18,10 +19,85 @@ var MovieBoxCatalog = (function () {
       });
   }
 
-  // Instant seed data for instant 0ms TV bootup
+  // Dynamic service prober: detects whether port 8088, 8087, or 8089 is active
+  function getActiveServiceUrl() {
+    if (cachedServiceUrl) {
+      return Promise.resolve(cachedServiceUrl);
+    }
+
+    return new Promise(function (resolve) {
+      var remaining = SERVICE_PORTS.length;
+      var found = false;
+
+      function check(port) {
+        var base = "http://127.0.0.1:" + port;
+        var done = false;
+        var tid = setTimeout(function () {
+          if (!done) {
+            done = true;
+            step();
+          }
+        }, 350);
+
+        fetch(base + "/api/health")
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (done) return;
+            done = true;
+            clearTimeout(tid);
+            if (!found && d && (d.ok || d.name)) {
+              found = true;
+              cachedServiceUrl = base;
+              resolve(base);
+            } else {
+              step();
+            }
+          })
+          .catch(function () {
+            if (done) return;
+            // Also try /api/ping (fmhyplay service compatibility)
+            fetch(base + "/api/ping")
+              .then(function (r2) { return r2.json(); })
+              .then(function (d2) {
+                if (done) return;
+                done = true;
+                clearTimeout(tid);
+                if (!found && d2 && d2.ok) {
+                  found = true;
+                  cachedServiceUrl = base;
+                  resolve(base);
+                } else {
+                  step();
+                }
+              })
+              .catch(function () {
+                if (done) return;
+                done = true;
+                clearTimeout(tid);
+                step();
+              });
+          });
+      }
+
+      function step() {
+        remaining--;
+        if (remaining <= 0 && !found) {
+          cachedServiceUrl = "http://127.0.0.1:8088";
+          resolve(cachedServiceUrl);
+        }
+      }
+
+      for (var i = 0; i < SERVICE_PORTS.length; i++) {
+        check(SERVICE_PORTS[i]);
+      }
+    });
+  }
+
+  // Instant seed data for instant 0ms TV bootup with embedded TMDB IDs
   var SEED_MOVIES = [
     {
       id: "tt15239678",
+      tmdb: "693134",
       name: "Dune: Part Two",
       type: "movie",
       year: "2024",
@@ -33,6 +109,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt15398776",
+      tmdb: "872585",
       name: "Oppenheimer",
       type: "movie",
       year: "2023",
@@ -44,6 +121,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt9362722",
+      tmdb: "569094",
       name: "Spider-Man: Across the Spider-Verse",
       type: "movie",
       year: "2023",
@@ -55,6 +133,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt1745960",
+      tmdb: "361743",
       name: "Top Gun: Maverick",
       type: "movie",
       year: "2022",
@@ -66,6 +145,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt1877830",
+      tmdb: "414906",
       name: "The Batman",
       type: "movie",
       year: "2022",
@@ -77,6 +157,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt0816692",
+      tmdb: "157336",
       name: "Interstellar",
       type: "movie",
       year: "2014",
@@ -88,6 +169,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt1375666",
+      tmdb: "27205",
       name: "Inception",
       type: "movie",
       year: "2010",
@@ -102,6 +184,7 @@ var MovieBoxCatalog = (function () {
   var SEED_SERIES = [
     {
       id: "tt2788316",
+      tmdb: "126308",
       name: "Shōgun",
       type: "series",
       year: "2024",
@@ -113,6 +196,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt12637874",
+      tmdb: "106379",
       name: "Fallout",
       type: "series",
       year: "2024",
@@ -124,6 +208,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt3581920",
+      tmdb: "502119",
       name: "The Last of Us",
       type: "series",
       year: "2023",
@@ -135,6 +220,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt11126994",
+      tmdb: "94605",
       name: "Arcane",
       type: "series",
       year: "2021",
@@ -146,6 +232,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt0903747",
+      tmdb: "1396",
       name: "Breaking Bad",
       type: "series",
       year: "2008",
@@ -157,6 +244,7 @@ var MovieBoxCatalog = (function () {
     },
     {
       id: "tt4574334",
+      tmdb: "66732",
       name: "Stranger Things",
       type: "series",
       year: "2016",
@@ -195,10 +283,66 @@ var MovieBoxCatalog = (function () {
     } catch (e) {}
   }
 
+  // Backup resolver using service CORS-free /api/fetch if /api/resolve fails
+  function serviceFetchResolve(srvUrl, isSeries, imdbId, tmdbId, season, episode) {
+    var resolvedId = tmdbId || imdbId;
+    if (!resolvedId) return Promise.resolve({ ok: false, streams: [] });
+
+    var apiPath = isSeries
+      ? ("https://vixsrc.to/api/tv/" + encodeURIComponent(resolvedId) + "/" + season + "/" + episode)
+      : ("https://vixsrc.to/api/movie/" + encodeURIComponent(resolvedId));
+    var pageRef = isSeries
+      ? ("https://vixsrc.to/tv/" + resolvedId + "/" + season + "/" + episode)
+      : ("https://vixsrc.to/movie/" + resolvedId);
+
+    var fetchUrl1 = srvUrl + "/api/fetch?url=" + encodeURIComponent(apiPath) + "&ref=" + encodeURIComponent(pageRef);
+
+    return fetch(fetchUrl1)
+      .then(function (r) { return r.json(); })
+      .then(function (j1) {
+        if (!j1 || !j1.src) return { ok: false, streams: [] };
+        var embedUrl = j1.src.indexOf("http") === 0 ? j1.src : ("https://vixsrc.to" + j1.src);
+        var fetchUrl2 = srvUrl + "/api/fetch?url=" + encodeURIComponent(embedUrl) + "&ref=" + encodeURIComponent(pageRef);
+
+        return fetch(fetchUrl2).then(function (r2) { return r2.text(); }).then(function (html) {
+          var tok = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
+          var exp = html.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
+          var mUrl = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
+          if (!tok || !exp || !mUrl) return { ok: false, streams: [] };
+
+          var rawM3u8 = mUrl[1] + "?token=" + encodeURIComponent(tok[1]) + "&expires=" + encodeURIComponent(exp[1]) + "&h=1&lang=en";
+          var proxyM3u8 = srvUrl + "/proxy/stream?url=" + encodeURIComponent(rawM3u8) +
+                          "&ref=" + encodeURIComponent("https://vixsrc.to/") +
+                          "&origin=" + encodeURIComponent("https://vixsrc.to");
+
+          var streamItem = {
+            server: "VIP Server 1",
+            label: "MovieBox Direct FHD 1080p (Native)",
+            quality: "1080p",
+            url: proxyM3u8,
+            rawUrl: rawM3u8,
+            referer: "https://vixsrc.to/",
+            origin: "https://vixsrc.to",
+            headers: { Referer: "https://vixsrc.to/", Origin: "https://vixsrc.to" }
+          };
+
+          return {
+            ok: true,
+            streams: [streamItem],
+            url: proxyM3u8
+          };
+        });
+      })
+      .catch(function () {
+        return { ok: false, streams: [] };
+      });
+  }
+
   return {
     GENRES: GENRES,
     getSeedMovies: function () { return SEED_MOVIES; },
     getSeedSeries: function () { return SEED_SERIES; },
+    getActiveServiceUrl: getActiveServiceUrl,
 
     // 1. Trending / Featured Feeds
     getTrendingMovies: function () {
@@ -267,76 +411,52 @@ var MovieBoxCatalog = (function () {
       });
     },
 
-    // 4. Stream Resolution (Direct Native HD 1080p — No Iframes!)
+    // 4. Stream Resolution (Direct Native HD 1080p — Multi-Port Dynamic Resolution)
     resolveStreams: function (type, imdbId, tmdbId, season, episode) {
       var isSeries = (type === "series" || type === "tv");
       var s = season || 1;
       var e = episode || 1;
-      var qUrl = SERVICE_URL + "/api/resolve?type=" + (isSeries ? "series" : "movie") +
-                 "&imdb=" + encodeURIComponent(imdbId || "") +
-                 "&tmdb=" + encodeURIComponent(tmdbId || "") +
-                 "&s=" + s + "&e=" + e;
 
-      function clientFallback() {
-        var tmdbPromise = tmdbId
-          ? Promise.resolve(String(tmdbId))
-          : MovieBoxCatalog.getDetail(type, imdbId).then(function (det) {
-              return det && (det.moviedb_id || det.tmdb_id) ? String(det.moviedb_id || det.tmdb_id) : "";
-            });
-
-        return tmdbPromise.then(function (resolvedTmdb) {
-          if (!resolvedTmdb) return { ok: false, streams: [] };
-          var apiPath = isSeries
-            ? ("https://vixsrc.to/api/tv/" + encodeURIComponent(resolvedTmdb) + "/" + s + "/" + e)
-            : ("https://vixsrc.to/api/movie/" + encodeURIComponent(resolvedTmdb));
-          var pageRef = isSeries
-            ? ("https://vixsrc.to/tv/" + resolvedTmdb + "/" + s + "/" + e)
-            : ("https://vixsrc.to/movie/" + resolvedTmdb);
-
-          return fetch(apiPath, { headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.json(); })
-            .then(function (j) {
-              if (!j || !j.src) return { ok: false, streams: [] };
-              var embedUrl = j.src.indexOf("http") === 0 ? j.src : ("https://vixsrc.to" + j.src);
-              return fetch(embedUrl).then(function (r2) { return r2.text(); }).then(function (html) {
-                var tok = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
-                var exp = html.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
-                var mUrl = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
-                if (!tok || !exp || !mUrl) return { ok: false, streams: [] };
-
-                var rawM3u8 = mUrl[1] + "?token=" + encodeURIComponent(tok[1]) + "&expires=" + encodeURIComponent(exp[1]) + "&h=1&lang=en";
-                var proxyM3u8 = SERVICE_URL + "/proxy/stream?url=" + encodeURIComponent(rawM3u8) +
-                                "&ref=" + encodeURIComponent("https://vixsrc.to/") +
-                                "&origin=" + encodeURIComponent("https://vixsrc.to");
-
-                var streamItem = {
-                  server: "VIP Server 1",
-                  label: "MovieBox Direct FHD 1080p (Native)",
-                  quality: "1080p",
-                  url: proxyM3u8,
-                  rawUrl: rawM3u8,
-                  referer: "https://vixsrc.to/",
-                  origin: "https://vixsrc.to",
-                  headers: { Referer: "https://vixsrc.to/", Origin: "https://vixsrc.to" }
-                };
-
-                return {
-                  ok: true,
-                  streams: [streamItem],
-                  url: proxyM3u8
-                };
-              });
-            }).catch(function () {
-              return { ok: false, streams: [] };
-            });
-        });
+      // Match known TMDB from seed items if not passed
+      var finalTmdb = tmdbId;
+      if (!finalTmdb && imdbId) {
+        var allSeeds = SEED_MOVIES.concat(SEED_SERIES);
+        for (var i = 0; i < allSeeds.length; i++) {
+          if (allSeeds[i].id === imdbId && allSeeds[i].tmdb) {
+            finalTmdb = allSeeds[i].tmdb;
+            break;
+          }
+        }
       }
 
-      return getJson(qUrl).then(function (res) {
-        if (res && res.ok && res.streams && res.streams.length > 0) return res;
-        return clientFallback();
-      }).catch(function () {
-        return clientFallback();
+      return getActiveServiceUrl().then(function (srvUrl) {
+        var qUrl = srvUrl + "/api/resolve?type=" + (isSeries ? "series" : "movie") +
+                   "&imdb=" + encodeURIComponent(imdbId || "") +
+                   "&tmdb=" + encodeURIComponent(finalTmdb || "") +
+                   "&s=" + s + "&e=" + e;
+
+        return getJson(qUrl).then(function (res) {
+          if (res && res.ok && res.streams && res.streams.length > 0) {
+            // Ensure all proxy URLs point to the active service port
+            res.streams = res.streams.map(function (st) {
+              if (st.url && st.url.indexOf('/proxy/stream') !== -1) {
+                st.url = st.url.replace(/http:\/\/127\.0\.0\.1:\d+/, srvUrl);
+              } else if (st.url && st.url.indexOf('http') === 0 && st.url.indexOf(srvUrl) !== 0) {
+                // If service returned raw URL (fmhyplay service), wrap in active proxy!
+                st.url = srvUrl + "/proxy/stream?url=" + encodeURIComponent(st.url) +
+                         "&ref=" + encodeURIComponent(st.referer || "https://vixsrc.to/") +
+                         "&origin=" + encodeURIComponent(st.origin || "https://vixsrc.to");
+              }
+              return st;
+            });
+            return res;
+          }
+
+          // Fallback to service fetch resolver
+          return serviceFetchResolve(srvUrl, isSeries, imdbId, finalTmdb, s, e);
+        }).catch(function () {
+          return serviceFetchResolve(srvUrl, isSeries, imdbId, finalTmdb, s, e);
+        });
       });
     },
 

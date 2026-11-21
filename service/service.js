@@ -23,6 +23,22 @@ var PORT = 8088;
 var DEFAULT_UA = "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 TV Safari/537.36";
 var CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+var TMDB_CACHE = {
+    "tt15239678": "693134",
+    "tt15398776": "872585",
+    "tt9362722": "569094",
+    "tt1745960": "361743",
+    "tt1877830": "414906",
+    "tt0816692": "157336",
+    "tt1375666": "27205",
+    "tt2788316": "126308",
+    "tt12637874": "106379",
+    "tt3581920": "502119",
+    "tt11126994": "94605",
+    "tt0903747": "1396",
+    "tt4574334": "66732"
+};
+
 var STATE_PATHS = [
     '/home/owner/share/movieboxData.json',
     path.join(process.cwd ? process.cwd() : '.', 'movieboxData.json')
@@ -62,28 +78,6 @@ function writeState(data) {
     }
 }
 
-// Common ad-tracker domains blocked in embed players
-var blockedDomains = {
-    "doubleclick.net": 1, "googlesyndication.com": 1, "googleadservices.com": 1,
-    "adnxs.com": 1, "popads.net": 1, "popcash.net": 1, "propellerads.com": 1,
-    "exoclick.com": 1, "juicyads.com": 1, "trafficjunky.net": 1, "adsterra.com": 1,
-    "hilltopads.net": 1, "clickadu.com": 1, "adcash.com": 1, "bidvertiser.com": 1,
-    "onclkds.com": 1, "afcdn.net": 1, "tsyndicate.com": 1, "realsrv.com": 1,
-    "admaven.com": 1, "galaksion.com": 1, "histats.com": 1
-};
-
-function isDomainBlocked(host) {
-    if (!host) return false;
-    var h = String(host).toLowerCase().trim();
-    while (h) {
-        if (blockedDomains[h]) return true;
-        var dot = h.indexOf('.');
-        if (dot < 0) break;
-        h = h.substring(dot + 1);
-    }
-    return false;
-}
-
 // Low-level HTTP buffer fetcher
 function fetchBuffer(targetUrl, options, callback) {
     options = options || {};
@@ -91,7 +85,14 @@ function fetchBuffer(targetUrl, options, callback) {
     var isHttps = parsed.protocol === 'https:';
     var client = isHttps ? https : http;
 
-    var headers = Object.assign({}, options.headers || {});
+    var headers = {};
+    if (options.headers) {
+        var optKeys = Object.keys(options.headers);
+        for (var k = 0; k < optKeys.length; k++) {
+            headers[optKeys[k]] = options.headers[optKeys[k]];
+        }
+    }
+
     if (!headers['User-Agent']) headers['User-Agent'] = options.ua || CHROME_UA;
     if (!headers['Accept']) headers['Accept'] = options.accept || '*/*';
     if (!headers['Accept-Encoding']) headers['Accept-Encoding'] = 'gzip, deflate';
@@ -154,7 +155,6 @@ function sendJson(res, status, obj) {
 function srtToVtt(srtStr) {
     var vtt = "WEBVTT\n\n";
     var normalized = srtStr.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    // Replace 00:00:00,000 with 00:00:00.000
     normalized = normalized.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
     vtt += normalized;
     return vtt;
@@ -173,13 +173,15 @@ var server = http.createServer(function (req, res) {
     var parsedUrl = urlModule.parse(req.url, true);
     var pathname = parsedUrl.pathname;
     var query = parsedUrl.query || {};
+    var reqHost = (req.headers && req.headers.host) || ('127.0.0.1:' + PORT);
 
-    // 1. Health check
-    if (pathname === '/api/health') {
+    // 1. Health check & Ping
+    if (pathname === '/api/health' || pathname === '/api/ping') {
         return sendJson(res, 200, {
             ok: true,
             name: "MovieBox Morphe Service",
-            version: "1.0.0",
+            version: "1.3.0",
+            port: PORT,
             time: Date.now()
         });
     }
@@ -263,7 +265,7 @@ var server = http.createServer(function (req, res) {
                         line = line.replace(/URI="([^"]+)"/g, function (match, rawUri) {
                             var resolved = urlModule.resolve(baseUrl, rawUri);
                             var q = 'url=' + encodeURIComponent(resolved) + '&ref=' + encodeURIComponent(ref) + '&origin=' + encodeURIComponent(orig);
-                            return 'URI="http://127.0.0.1:' + PORT + '/proxy/stream?' + q + '"';
+                            return 'URI="http://' + reqHost + '/proxy/stream?' + q + '"';
                         });
                         out.push(line);
                         continue;
@@ -277,7 +279,7 @@ var server = http.createServer(function (req, res) {
                     // Video/Audio Chunk URL line
                     var chunkResolved = urlModule.resolve(baseUrl, line);
                     var chunkQ = 'url=' + encodeURIComponent(chunkResolved) + '&ref=' + encodeURIComponent(ref) + '&origin=' + encodeURIComponent(orig);
-                    out.push('http://127.0.0.1:' + PORT + '/proxy/stream?' + chunkQ);
+                    out.push('http://' + reqHost + '/proxy/stream?' + chunkQ);
                 }
 
                 var rewritten = out.join('\n');
@@ -307,19 +309,19 @@ var server = http.createServer(function (req, res) {
         var rType = (query.type === 'series' || query.type === 'tv') ? 'series' : 'movie';
         var rImdb = query.imdb || '';
         var rTmdb = query.tmdb || '';
-        var rSeason = parseInt(query.s || '1', 10);
-        var rEpisode = parseInt(query.e || '1', 10);
+        var rSeason = parseInt(query.s || query.season || '1', 10) || 1;
+        var rEpisode = parseInt(query.e || query.episode || '1', 10) || 1;
 
-        function resolveStreams(finalTmdb) {
+        function resolveStreams(finalId) {
             var streams = [];
 
             // Provider 1: VixSrc HD
             var vixUrl = rType === 'series'
-                ? ('https://vixsrc.to/api/tv/' + encodeURIComponent(finalTmdb) + '/' + rSeason + '/' + rEpisode)
-                : ('https://vixsrc.to/api/movie/' + encodeURIComponent(finalTmdb));
+                ? ('https://vixsrc.to/api/tv/' + encodeURIComponent(finalId) + '/' + rSeason + '/' + rEpisode)
+                : ('https://vixsrc.to/api/movie/' + encodeURIComponent(finalId));
             var vixRef = rType === 'series'
-                ? ('https://vixsrc.to/tv/' + finalTmdb + '/' + rSeason + '/' + rEpisode)
-                : ('https://vixsrc.to/movie/' + finalTmdb);
+                ? ('https://vixsrc.to/tv/' + finalId + '/' + rSeason + '/' + rEpisode)
+                : ('https://vixsrc.to/movie/' + finalId);
 
             fetchBuffer(vixUrl, { referer: vixRef, ua: CHROME_UA, timeout: 8000 }, function (err1, buf1, status1, headers1) {
                 if (!err1 && buf1) {
@@ -336,7 +338,7 @@ var server = http.createServer(function (req, res) {
                                     var mUrl = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
                                     if (tok && exp && mUrl) {
                                         var m3u8 = mUrl[1] + "?token=" + encodeURIComponent(tok[1]) + "&expires=" + encodeURIComponent(exp[1]) + "&h=1&lang=en";
-                                        var proxyM3u8 = 'http://127.0.0.1:' + PORT + '/proxy/stream?url=' + encodeURIComponent(m3u8) +
+                                        var proxyM3u8 = 'http://' + reqHost + '/proxy/stream?url=' + encodeURIComponent(m3u8) +
                                                         '&ref=' + encodeURIComponent('https://vixsrc.to/') +
                                                         '&origin=' + encodeURIComponent('https://vixsrc.to');
                                         streams.push({
@@ -363,7 +365,7 @@ var server = http.createServer(function (req, res) {
             function finishResponse() {
                 return sendJson(res, 200, {
                     ok: streams.length > 0,
-                    tmdb: finalTmdb,
+                    tmdb: finalId,
                     imdb: rImdb,
                     url: streams.length > 0 ? streams[0].url : "",
                     streams: streams
@@ -375,17 +377,22 @@ var server = http.createServer(function (req, res) {
             return resolveStreams(rTmdb);
         }
 
-        // Lookup TMDB via Cinemeta
         if (rImdb) {
+            if (TMDB_CACHE[rImdb]) {
+                return resolveStreams(TMDB_CACHE[rImdb]);
+            }
+            // Quick Cinemeta lookup with 4s timeout
             var cinemetaUrl = 'https://v3-cinemeta.strem.io/meta/' + rType + '/' + encodeURIComponent(rImdb) + '.json';
-            fetchBuffer(cinemetaUrl, { timeout: 6000 }, function (err, buf) {
+            fetchBuffer(cinemetaUrl, { timeout: 4000 }, function (err, buf) {
                 var foundTmdb = '';
                 if (!err && buf) {
                     try {
                         var parsed = JSON.parse(buf.toString('utf8'));
                         foundTmdb = (parsed && parsed.meta && (parsed.meta.moviedb_id || parsed.meta.tmdb_id)) || '';
+                        if (foundTmdb) TMDB_CACHE[rImdb] = foundTmdb;
                     } catch (e) {}
                 }
+                // VixSrc also accepts IMDb IDs directly if Cinemeta lookup returns empty
                 resolveStreams(foundTmdb || rImdb);
             });
             return;
@@ -397,40 +404,60 @@ var server = http.createServer(function (req, res) {
     // 6. Subtitles API (/api/subs) - OpenSubtitles Live Search + WebVTT proxy
     if (pathname === '/api/subs') {
         var subImdb = query.imdb ? query.imdb.replace(/^tt/, '') : '';
-        var subLang = query.lang || 'ara,eng';
+        var rawLang = query.lang || 'ara,eng';
         var subSeason = query.s || '';
         var subEpisode = query.e || '';
 
         if (!subImdb) return sendJson(res, 400, { ok: false, error: 'Missing imdb parameter' });
 
-        var osUrl = 'https://rest.opensubtitles.org/search/imdbid-' + subImdb +
-                    (subSeason ? ('/season-' + subSeason) : '') +
-                    (subEpisode ? ('/episode-' + subEpisode) : '') +
-                    '/sublanguageid-' + subLang;
+        var langs = rawLang.split(',');
+        var allResults = [];
+        var completed = 0;
 
-        fetchBuffer(osUrl, { ua: 'TemporaryUserAgent', timeout: 8000 }, function (err, buf) {
-            if (err || !buf) return sendJson(res, 502, { ok: false, error: 'OpenSubtitles unreachable' });
-            try {
-                var list = JSON.parse(buf.toString('utf8'));
-                var results = [];
-                for (var i = 0; i < (list || []).length && i < 20; i++) {
-                    var item = list[i];
-                    if (item && item.SubDownloadLink) {
-                        results.push({
-                            id: item.IDSubtitleFile,
-                            lang: item.SubLanguageID,
-                            langName: item.LanguageName,
-                            name: item.MovieReleaseName || item.SubFileName,
-                            url: item.SubDownloadLink.replace('.gz', ''),
-                            vttUrl: 'http://127.0.0.1:' + PORT + '/api/vtt?url=' + encodeURIComponent(item.SubDownloadLink)
-                        });
-                    }
-                }
-                return sendJson(res, 200, { ok: true, subtitles: results });
-            } catch (e) {
-                return sendJson(res, 500, { ok: false, error: 'Parse error' });
+        function fetchLang(langCode) {
+            var l = langCode.trim();
+            if (!l) {
+                step();
+                return;
             }
-        });
+            var osUrl = 'https://rest.opensubtitles.org/search/imdbid-' + subImdb +
+                        (subSeason ? ('/season-' + subSeason) : '') +
+                        (subEpisode ? ('/episode-' + subEpisode) : '') +
+                        '/sublanguageid-' + l;
+
+            fetchBuffer(osUrl, { ua: 'TemporaryUserAgent', timeout: 8000 }, function (err, buf) {
+                if (!err && buf) {
+                    try {
+                        var list = JSON.parse(buf.toString('utf8'));
+                        for (var i = 0; i < (list || []).length && i < 15; i++) {
+                            var item = list[i];
+                            if (item && item.SubDownloadLink) {
+                                allResults.push({
+                                    id: item.IDSubtitleFile,
+                                    lang: item.SubLanguageID,
+                                    langName: item.LanguageName,
+                                    name: item.MovieReleaseName || item.SubFileName,
+                                    url: item.SubDownloadLink.replace('.gz', ''),
+                                    vttUrl: 'http://' + reqHost + '/api/vtt?url=' + encodeURIComponent(item.SubDownloadLink)
+                                });
+                            }
+                        }
+                    } catch (e) {}
+                }
+                step();
+            });
+        }
+
+        function step() {
+            completed++;
+            if (completed >= langs.length) {
+                return sendJson(res, 200, { ok: true, subtitles: allResults });
+            }
+        }
+
+        for (var li = 0; li < langs.length; li++) {
+            fetchLang(langs[li]);
+        }
         return;
     }
 
@@ -455,10 +482,27 @@ var server = http.createServer(function (req, res) {
     res.end('Not Found');
 });
 
+function startServer(portToTry) {
+    server.listen(portToTry, '127.0.0.1', function () {
+        PORT = portToTry;
+        console.log('MovieBox Morphe service listening on http://127.0.0.1:' + PORT);
+    });
+}
+
 server.on('error', function (err) {
-    console.error('MovieBox service error:', err.message);
+    if (err.code === 'EADDRINUSE') {
+        if (PORT === 8088) {
+            console.warn('Port 8088 in use, trying 8089...');
+            startServer(8089);
+        } else if (PORT === 8089) {
+            console.warn('Port 8089 in use, trying 8087...');
+            startServer(8087);
+        } else {
+            console.error('All ports in use for MovieBox service:', err.message);
+        }
+    } else {
+        console.error('MovieBox service error:', err.message);
+    }
 });
 
-server.listen(PORT, '127.0.0.1', function () {
-    console.log('MovieBox Morphe service listening on http://127.0.0.1:' + PORT);
-});
+startServer(PORT);

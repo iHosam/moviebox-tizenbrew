@@ -353,57 +353,62 @@ var MovieBoxPlayer = (function () {
 
   function fetchSubtitles(imdbId, season, episode) {
     if (!imdbId) return;
-    var qUrl = "http://127.0.0.1:8088/api/subs?imdb=" + encodeURIComponent(imdbId) +
-               "&lang=ara,eng" +
-               (season ? ("&s=" + season) : "") +
-               (episode ? ("&e=" + episode) : "");
+    MovieBoxCatalog.getActiveServiceUrl().then(function (srvUrl) {
+      var qUrl = srvUrl + "/api/subs?imdb=" + encodeURIComponent(imdbId) +
+                 "&lang=ara,eng" +
+                 (season ? ("&s=" + season) : "") +
+                 (episode ? ("&e=" + episode) : "");
 
-    fetch(qUrl)
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (data && data.ok && data.subtitles) {
-          state.subtitles = data.subtitles;
-          // Look for Arabic or English subtitle
-          var araSub = null;
-          var engSub = null;
-          data.subtitles.forEach(function (s) {
-            if (s.lang === "ara" && !araSub) araSub = s;
-            if (s.lang === "eng" && !engSub) engSub = s;
-          });
+      fetch(qUrl)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data && data.ok && data.subtitles) {
+            state.subtitles = data.subtitles;
+            // Look for Arabic or English subtitle
+            var araSub = null;
+            var engSub = null;
+            data.subtitles.forEach(function (s) {
+              if (s.lang === "ara" && !araSub) araSub = s;
+              if (s.lang === "eng" && !engSub) engSub = s;
+            });
 
-          // Set default sub (Arabic preferred, else English)
-          var chosen = araSub || engSub;
-          if (chosen) {
-            loadSubtitleTrack(chosen, true);
+            // Set default sub (Arabic preferred, else English)
+            var chosen = araSub || engSub;
+            if (chosen) {
+              loadSubtitleTrack(chosen, true);
+            }
           }
-        }
-      })
-      .catch(function () {});
+        })
+        .catch(function () {});
+    });
   }
 
   function loadSubtitleTrack(subObj, makeActive) {
     if (!subObj || !subObj.vttUrl) return;
-    fetch(subObj.vttUrl)
-      .then(function (r) { return r.text(); })
-      .then(function (rawVtt) {
-        var cues = parseSubCues(rawVtt);
-        var trackObj = {
-          label: (subObj.lang === "ara" ? "🇸🇦 Arabic" : "🇬🇧 English"),
-          lang: subObj.lang,
-          cues: cues
-        };
-        state.loadedSubTracks.push(trackObj);
-        if (makeActive) {
-          state.activeSubIdx = state.loadedSubTracks.length - 1;
-          var subChip = el("pchip-subs");
-          if (subChip) {
-            var valEl = subChip.querySelector(".pchip-val");
-            if (valEl) valEl.textContent = trackObj.label + " ✓";
+    MovieBoxCatalog.getActiveServiceUrl().then(function (srvUrl) {
+      var targetVtt = subObj.vttUrl.replace(/http:\/\/127\.0\.0\.1:\d+/, srvUrl);
+      fetch(targetVtt)
+        .then(function (r) { return r.text(); })
+        .then(function (rawVtt) {
+          var cues = parseSubCues(rawVtt);
+          var trackObj = {
+            label: (subObj.lang === "ara" ? "🇸🇦 Arabic" : "🇬🇧 English"),
+            lang: subObj.lang,
+            cues: cues
+          };
+          state.loadedSubTracks.push(trackObj);
+          if (makeActive) {
+            state.activeSubIdx = state.loadedSubTracks.length - 1;
+            var subChip = el("pchip-subs");
+            if (subChip) {
+              var valEl = subChip.querySelector(".pchip-val");
+              if (valEl) valEl.textContent = trackObj.label + " ✓";
+            }
+            say("Subtitles: " + trackObj.label);
           }
-          say("Subtitles: " + trackObj.label);
-        }
-      })
-      .catch(function () {});
+        })
+        .catch(function () {});
+    });
   }
 
   function showQualityPicker() {
