@@ -189,11 +189,15 @@ var MovieBoxApp = (function () {
       if (!child || (child.style && child.style.display === "none")) continue;
       var cls = child.className || "";
 
-      if (cls.indexOf("h-row") !== -1 ||
+      if (cls.indexOf("v-list") !== -1) {
+        var vItems = Array.prototype.slice.call(child.querySelectorAll(".focusable")).filter(isVisible);
+        for (var vi = 0; vi < vItems.length; vi++) {
+          rows.push([vItems[vi]]);
+        }
+      } else if (cls.indexOf("h-row") !== -1 ||
           cls.indexOf("hero-btns") !== -1 ||
           cls.indexOf("action-row") !== -1 ||
-          cls.indexOf("kb-row") !== -1 ||
-          cls.indexOf("v-list") !== -1) {
+          cls.indexOf("kb-row") !== -1) {
         var rowItems = Array.prototype.slice.call(child.querySelectorAll(".focusable")).filter(isVisible);
         if (rowItems.length > 0) {
           rowItems._container = child;
@@ -369,7 +373,10 @@ var MovieBoxApp = (function () {
 
     state.modalOpen = false;
     state.modalFocusEl = null;
-    if (state.preModalFocusEl && isVisible(state.preModalFocusEl)) {
+
+    if (MovieBoxPlayer.isOpen()) {
+      MovieBoxPlayer.setChipRowFocus(true);
+    } else if (state.preModalFocusEl && isVisible(state.preModalFocusEl)) {
       setFocus(state.preModalFocusEl, false);
     }
   }
@@ -390,37 +397,7 @@ var MovieBoxApp = (function () {
       var isEnter = (k === 13 || key === "Enter");
       var isBack = (k === 10009 || k === 27 || k === 8 || key === "Escape" || key === "Backspace");
 
-      // 1. If Video Player is open, delegate to MovieBoxPlayer
-      if (el("player-layer") && el("player-layer").classList.contains("open")) {
-        if (isBack) {
-          e.preventDefault();
-          MovieBoxPlayer.close();
-          return;
-        }
-        if (k === 415 || k === 19 || isEnter || key === "MediaPlay" || key === "MediaPause" || key === "MediaPlayPause") {
-          e.preventDefault();
-          MovieBoxPlayer.togglePlay();
-          return;
-        }
-        if (isLeft) {
-          e.preventDefault();
-          MovieBoxPlayer.seek(-10);
-          return;
-        }
-        if (isRight) {
-          e.preventDefault();
-          MovieBoxPlayer.seek(10);
-          return;
-        }
-        if (isUp || isDown) {
-          e.preventDefault();
-          MovieBoxPlayer.showOsd();
-          return;
-        }
-        return;
-      }
-
-      // 2. If Modal is open
+      // 1. If Modal is open (Quality / Subs / Server / Audio pickers, Detail modal), handle modal navigation FIRST!
       if (state.modalOpen) {
         if (isBack) {
           e.preventDefault();
@@ -433,12 +410,23 @@ var MovieBoxApp = (function () {
         if (isDown) { e.preventDefault(); moveFocusSpatial("down"); return; }
         if (isEnter) {
           e.preventDefault();
-          if (state.modalFocusEl && state.modalFocusEl._onClick) {
-            state.modalFocusEl._onClick(state.modalFocusEl);
+          var mTarget = state.modalFocusEl || state.focusedEl;
+          if (mTarget && mTarget._onClick) {
+            mTarget._onClick(mTarget);
+          } else if (mTarget) {
+            mTarget.click();
           }
           return;
         }
         return;
+      }
+
+      // 2. If Video Player is open, delegate directly to MovieBoxPlayer
+      if (MovieBoxPlayer.isOpen() || (el("player-layer") && el("player-layer").classList.contains("open"))) {
+        if (MovieBoxPlayer.handleKeyDown(e)) {
+          return;
+        }
+      }
       }
 
       // 3. Samsung TV Color Shortcut Buttons

@@ -702,10 +702,35 @@ html, body {
   font-size: 17px;
   font-weight: 600;
   cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.pchip.focused, .pchip:focus {
+  background: var(--accent-gold) !important;
+  color: #000000 !important;
+  border-color: #ffffff !important;
+  outline: 4px solid #ffffff !important;
+  box-shadow: 0 0 30px rgba(255, 184, 0, 0.95) !important;
+  transform: scale(1.08);
+}
+
+.pchip.focused .pchip-val, .pchip:focus .pchip-val {
+  color: #000000 !important;
+  font-weight: 800 !important;
 }
 
 .pchip-val {
   color: var(--accent-gold);
+}
+
+.osd-btn.focused, .osd-btn:focus {
+  background: var(--accent-gold) !important;
+  color: #000000 !important;
+  border-color: #ffffff !important;
+  outline: 4px solid #ffffff !important;
+  box-shadow: 0 0 25px rgba(255, 184, 0, 0.9) !important;
+  transform: scale(1.08);
 }
 
 /* In-App Browser & Virtual Pointer */
@@ -763,10 +788,15 @@ html, body {
 }
 
 /* List Modal */
+#list-modal {
+  z-index: 1000;
+}
+
 .list-modal-box {
-  width: 600px;
+  width: 650px;
   max-height: 800px;
   background: #161722;
+  border: 2px solid rgba(255, 184, 0, 0.4);
   border-radius: 16px;
   padding: 40px;
   position: absolute;
@@ -775,18 +805,19 @@ html, body {
   transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.95);
 }
 
 #list-modal-title {
   font-size: 26px;
   font-weight: 800;
   margin-bottom: 24px;
+  color: #ffffff;
 }
 
 #list-modal-items {
   overflow-y: auto;
-  max-height: 550px;
+  max-height: 520px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -800,6 +831,17 @@ html, body {
   font-size: 18px;
   font-weight: 600;
   cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.modal-item.focused, .modal-item:focus {
+  background: var(--accent-gold) !important;
+  color: #000000 !important;
+  border-color: #ffffff !important;
+  outline: 4px solid #ffffff !important;
+  box-shadow: 0 0 25px rgba(255, 184, 0, 0.9) !important;
+  transform: scale(1.03);
 }
 
 .modal-item.active {
