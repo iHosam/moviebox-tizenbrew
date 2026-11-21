@@ -427,7 +427,6 @@ var MovieBoxApp = (function () {
           return;
         }
       }
-      }
 
       // 3. Samsung TV Color Shortcut Buttons
       if (k === 403 || key === "ColorF0Red") { // Red: Search
