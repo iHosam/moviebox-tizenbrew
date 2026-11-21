@@ -1,13 +1,19 @@
 /**
- * MovieBox (Morphe Edition) — Main Application Controller
- * Handles 10-foot spatial navigation, views, TV remote keybindings,
- * hero spotlight, and detail modal.
+ * MovieBox (Morphe Edition) — Main TV Application Controller
+ * Provides complete 2D spatial D-pad navigation, Samsung remote keybindings,
+ * catalog views, and modal management.
  */
 var MovieBoxApp = (function () {
   var TABS = ["Home", "Movies", "Series", "Search", "My List", "Settings"];
-  var activeTab = 0;
-  var focusedEl = null;
-  var currentDetailMeta = null;
+
+  var state = {
+    currentTab: 0,
+    focusedEl: null,
+    lastPageFocusEl: null,
+    modalOpen: false,
+    modalFocusEl: null,
+    preModalFocusEl: null
+  };
 
   function el(id) {
     return document.getElementById(id);
@@ -24,19 +30,38 @@ var MovieBoxApp = (function () {
     }, 2800);
   }
 
-  function setFocus(node) {
-    if (!node) return;
-    if (focusedEl && focusedEl !== node) {
-      focusedEl.classList.remove("focused");
+  // --- Samsung Tizen TV Input Key Registration ---
+  function initTizenKeys() {
+    if (window.tizen && window.tizen.tvinputdevice) {
+      var keys = [
+        "ColorF0Red", "ColorF1Green", "ColorF2Yellow", "ColorF3Blue",
+        "MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop",
+        "MediaFastForward", "MediaRewind", "MediaTrackNext", "MediaTrackPrevious",
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+        "Info"
+      ];
+      keys.forEach(function (k) {
+        try { window.tizen.tvinputdevice.registerKey(k); } catch (e) {}
+      });
     }
-    focusedEl = node;
-    node.classList.add("focused");
-    try {
-      node.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-    } catch (e) {}
   }
 
-  function makeFocusable(node, onClick) {
+  // --- Focus & Visibility Helpers ---
+  function isConnectedNode(node) {
+    if (!node) return false;
+    if (typeof node.isConnected === "boolean") return node.isConnected;
+    var root = el("app-root") || document.body;
+    return root ? root.contains(node) : true;
+  }
+
+  function isVisible(node) {
+    if (!node || !isConnectedNode(node)) return false;
+    if (node.style && node.style.display === "none") return false;
+    var rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function makeFocusable(node, onClick, onLongPress) {
     node.classList.add("focusable");
     node.tabIndex = 0;
     if (onClick) {
@@ -46,14 +71,257 @@ var MovieBoxApp = (function () {
         onClick(node);
       });
     }
+    if (onLongPress) {
+      node._onLongPress = onLongPress;
+      node.addEventListener("contextmenu", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        onLongPress(node);
+      });
+    }
     node.addEventListener("mouseenter", function () {
-      setFocus(node);
+      setFocus(node, false);
     });
     return node;
   }
 
+  function setFocus(node, scrollIntoView) {
+    if (!node || !isVisible(node)) return false;
+
+    if (state.modalOpen) {
+      if (state.modalFocusEl && state.modalFocusEl !== node) {
+        state.modalFocusEl.classList.remove("focused");
+      }
+      state.modalFocusEl = node;
+      node.classList.add("focused");
+      try { node.focus(); } catch (e) {}
+      if (scrollIntoView !== false) {
+        try { node.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
+      }
+      return true;
+    }
+
+    if (state.focusedEl && state.focusedEl !== node) {
+      state.focusedEl.classList.remove("focused");
+    }
+    state.focusedEl = node;
+    node.classList.add("focused");
+    try { node.focus(); } catch (e) {}
+
+    // Remember column index inside horizontal row (.h-row) for natural Up/Down traversal
+    var hRow = node.closest ? node.closest(".h-row") : null;
+    if (hRow) {
+      var hItems = Array.prototype.slice.call(hRow.querySelectorAll(".focusable")).filter(isVisible);
+      var hIdx = hItems.indexOf(node);
+      if (hIdx !== -1) hRow._lastCol = hIdx;
+    }
+
+    var page = el("main-scroll");
+    if (page && page.contains(node)) {
+      state.lastPageFocusEl = node;
+    }
+
+    if (scrollIntoView !== false) {
+      scrollNodeIntoComfortableView(node);
+    }
+    return true;
+  }
+
+  function scrollNodeIntoComfortableView(node) {
+    try {
+      // Horizontal row scroll
+      var hRow = node.closest ? node.closest(".h-row") : null;
+      if (hRow) {
+        var nr = node.getBoundingClientRect();
+        var rr = hRow.getBoundingClientRect();
+        if (rr.width > 0 && nr.width > 0) {
+          if (nr.left < rr.left + 50) {
+            hRow.scrollLeft -= (rr.left + 50 - nr.left);
+          } else if (nr.right > rr.right - 50) {
+            hRow.scrollLeft += (nr.right - (rr.right - 50));
+          }
+        }
+      }
+
+      // Vertical page scroll
+      var page = el("main-scroll");
+      if (page && page.contains(node)) {
+        var rect = node.getBoundingClientRect();
+        var pRect = page.getBoundingClientRect();
+        if (pRect.height > 0 && rect.height > 0) {
+          if (rect.top < pRect.top + 100) {
+            page.scrollTop -= (pRect.top + 100 - rect.top);
+          } else if (rect.bottom > pRect.bottom - 100) {
+            page.scrollTop += (rect.bottom - (pRect.bottom - 100));
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // --- 2D Navigation Hierarchy ---
+  function chunkArray(arr, size) {
+    var out = [];
+    for (var i = 0; i < arr.length; i += size) {
+      out.push(arr.slice(i, i + size));
+    }
+    return out;
+  }
+
+  function collectRowsFromContainer(container, rows) {
+    if (!container || !container.children) return;
+    var children = container.children;
+    for (var i = 0; i < children.length; i++) {
+      var child = children[i];
+      if (!child || (child.style && child.style.display === "none")) continue;
+      var cls = child.className || "";
+
+      if (cls.indexOf("h-row") !== -1 ||
+          cls.indexOf("hero-btns") !== -1 ||
+          cls.indexOf("action-row") !== -1 ||
+          cls.indexOf("kb-row") !== -1 ||
+          cls.indexOf("v-list") !== -1) {
+        var rowItems = Array.prototype.slice.call(child.querySelectorAll(".focusable")).filter(isVisible);
+        if (rowItems.length > 0) {
+          rowItems._container = child;
+          rowItems._isHRow = cls.indexOf("h-row") !== -1;
+          rows.push(rowItems);
+        }
+      } else if (cls.indexOf("media-grid") !== -1) {
+        var gridItems = Array.prototype.slice.call(child.querySelectorAll(".focusable")).filter(isVisible);
+        var chunks7 = chunkArray(gridItems, 7);
+        for (var c7 = 0; c7 < chunks7.length; c7++) rows.push(chunks7[c7]);
+      } else if (child.classList && child.classList.contains("focusable")) {
+        if (isVisible(child)) rows.push([child]);
+      } else if (child.children && child.children.length > 0) {
+        collectRowsFromContainer(child, rows);
+      }
+    }
+  }
+
+  function getNavigationRows() {
+    var rows = [];
+
+    // 1. If Generic Modal is open
+    var listModal = el("list-modal");
+    if (listModal && listModal.classList.contains("open")) {
+      collectRowsFromContainer(listModal, rows);
+      return rows;
+    }
+
+    // 2. If Detail Modal is open
+    var dModal = el("detail-modal");
+    if (dModal && dModal.classList.contains("open")) {
+      var dActions = el("detail-actions");
+      if (dActions) collectRowsFromContainer(dActions, rows);
+      var sTabs = el("season-tabs");
+      if (sTabs && sTabs.style.display !== "none") collectRowsFromContainer(sTabs, rows);
+      var epList = el("episodes-list");
+      if (epList && epList.style.display !== "none") collectRowsFromContainer(epList, rows);
+      return rows;
+    }
+
+    // 3. Top Navigation Bar is Row 0
+    var topBar = el("top-bar");
+    if (topBar) {
+      var topItems = Array.prototype.slice.call(topBar.querySelectorAll(".focusable")).filter(isVisible);
+      if (topItems.length > 0) {
+        topItems._isTopBar = true;
+        rows.push(topItems);
+      }
+    }
+
+    // 4. Main Page Content
+    var page = el("page-content");
+    if (page) {
+      collectRowsFromContainer(page, rows);
+    }
+
+    return rows;
+  }
+
+  function moveFocusSpatial(dir) {
+    var rows = getNavigationRows();
+    if (rows.length === 0) return false;
+
+    var current = state.modalOpen ? state.modalFocusEl : state.focusedEl;
+    var rIdx = -1;
+    var cIdx = -1;
+
+    if (current && isVisible(current)) {
+      for (var r = 0; r < rows.length; r++) {
+        var idx = rows[r].indexOf(current);
+        if (idx !== -1) {
+          rIdx = r;
+          cIdx = idx;
+          break;
+        }
+      }
+    }
+
+    // If no element currently focused, focus first element of content or row 0
+    if (rIdx === -1) {
+      var startRow = (!state.modalOpen && rows.length > 1) ? rows[1] : rows[0];
+      return setFocus(startRow[0], true);
+    }
+
+    var curRow = rows[rIdx];
+
+    if (dir === "left") {
+      if (cIdx > 0) {
+        return setFocus(curRow[cIdx - 1], true);
+      }
+      return true;
+    }
+
+    if (dir === "right") {
+      if (cIdx < curRow.length - 1) {
+        return setFocus(curRow[cIdx + 1], true);
+      }
+      return true;
+    }
+
+    if (dir === "up") {
+      if (rIdx > 0) {
+        var upRow = rows[rIdx - 1];
+        var targetUpEl = null;
+        if (upRow._isTopBar) {
+          var activeTabEl = document.querySelector(".nav-tab.active") || upRow[1] || upRow[0];
+          targetUpEl = activeTabEl;
+        } else if (upRow._isHRow && upRow._container && typeof upRow._container._lastCol === "number") {
+          targetUpEl = upRow[Math.min(upRow._container._lastCol, upRow.length - 1)];
+        } else {
+          targetUpEl = upRow[Math.min(cIdx, upRow.length - 1)];
+        }
+        return setFocus(targetUpEl, true);
+      }
+      return true;
+    }
+
+    if (dir === "down") {
+      if (rIdx < rows.length - 1) {
+        var downRow = rows[rIdx + 1];
+        var targetDownEl = null;
+        if (curRow._isTopBar && state.lastPageFocusEl && isVisible(state.lastPageFocusEl)) {
+          targetDownEl = state.lastPageFocusEl;
+        } else if (downRow._isHRow && downRow._container && typeof downRow._container._lastCol === "number") {
+          targetDownEl = downRow[Math.min(downRow._container._lastCol, downRow.length - 1)];
+        } else {
+          targetDownEl = downRow[Math.min(cIdx, downRow.length - 1)];
+        }
+        return setFocus(targetDownEl, true);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   // --- Modal Helpers ---
   function showModal(title, items) {
+    state.preModalFocusEl = state.focusedEl;
+    state.modalOpen = true;
+
     var modal = el("list-modal");
     el("list-modal-title").textContent = title;
     var list = el("list-modal-items");
@@ -64,26 +332,161 @@ var MovieBoxApp = (function () {
       btn.className = "modal-item focusable";
       btn.textContent = it.label;
       makeFocusable(btn, function () {
-        modal.classList.remove("open");
+        closeModal();
         if (it.action) it.action();
       });
       list.appendChild(btn);
     });
 
-    el("list-modal-close").onclick = function () {
-      modal.classList.remove("open");
-    };
+    var closeBtn = el("list-modal-close");
+    makeFocusable(closeBtn, function () {
+      closeModal();
+    });
 
     modal.classList.add("open");
     var first = list.querySelector(".focusable");
-    if (first) setFocus(first);
+    if (first) setFocus(first, true);
   }
 
-  // --- Navigation & Views ---
+  function closeModal() {
+    var listModal = el("list-modal");
+    if (listModal) listModal.classList.remove("open");
+    var dModal = el("detail-modal");
+    if (dModal) dModal.classList.remove("open");
+
+    state.modalOpen = false;
+    state.modalFocusEl = null;
+    if (state.preModalFocusEl && isVisible(state.preModalFocusEl)) {
+      setFocus(state.preModalFocusEl, false);
+    }
+  }
+
+  // --- Global Remote Keydown Handler ---
+  function initGlobalKeyListeners() {
+    function handleKeyDown(e) {
+      var k = e.keyCode || e.which || 0;
+      var key = e.key || "";
+
+      var isLeft = (k === 37 || key === "ArrowLeft" || key === "Left");
+      var isUp = (k === 38 || key === "ArrowUp" || key === "Up");
+      var isRight = (k === 39 || key === "ArrowRight" || key === "Right");
+      var isDown = (k === 40 || key === "ArrowDown" || key === "Down");
+      var isEnter = (k === 13 || key === "Enter");
+      var isBack = (k === 10009 || k === 27 || k === 8 || key === "Escape" || key === "Backspace");
+
+      // 1. If Video Player is open, delegate to MovieBoxPlayer
+      if (el("player-layer").classList.contains("open")) {
+        if (isBack) {
+          e.preventDefault();
+          MovieBoxPlayer.close();
+          return;
+        }
+        if (k === 415 || k === 19 || isEnter || key === "MediaPlay" || key === "MediaPause" || key === "MediaPlayPause") {
+          e.preventDefault();
+          MovieBoxPlayer.togglePlay();
+          return;
+        }
+        if (isLeft) {
+          e.preventDefault();
+          MovieBoxPlayer.seek(-10);
+          return;
+        }
+        if (isRight) {
+          e.preventDefault();
+          MovieBoxPlayer.seek(10);
+          return;
+        }
+        if (isUp || isDown) {
+          e.preventDefault();
+          MovieBoxPlayer.showOsd();
+          return;
+        }
+        return;
+      }
+
+      // 2. If Modal is open
+      if (state.modalOpen) {
+        if (isBack) {
+          e.preventDefault();
+          closeModal();
+          return;
+        }
+        if (isLeft) { e.preventDefault(); moveFocusSpatial("left"); return; }
+        if (isRight) { e.preventDefault(); moveFocusSpatial("right"); return; }
+        if (isUp) { e.preventDefault(); moveFocusSpatial("up"); return; }
+        if (isDown) { e.preventDefault(); moveFocusSpatial("down"); return; }
+        if (isEnter) {
+          e.preventDefault();
+          if (state.modalFocusEl && state.modalFocusEl._onClick) {
+            state.modalFocusEl._onClick(state.modalFocusEl);
+          }
+          return;
+        }
+        return;
+      }
+
+      // 3. Samsung TV Color Shortcut Buttons
+      if (k === 403 || key === "ColorF0Red") { // Red: Search
+        e.preventDefault();
+        switchTab(3);
+        return;
+      }
+      if (k === 406 || key === "ColorF3Blue") { // Blue: Watchlist
+        e.preventDefault();
+        switchTab(4);
+        return;
+      }
+
+      // 4. Back / Return Key
+      if (isBack) {
+        e.preventDefault();
+        if (state.currentTab !== 0) {
+          switchTab(0);
+          return;
+        }
+        // If on top bar on Home, ask to exit
+        var topBar = el("top-bar");
+        if (topBar && state.focusedEl && !topBar.contains(state.focusedEl)) {
+          var activeTabEl = document.querySelector(".nav-tab.active");
+          if (activeTabEl) setFocus(activeTabEl, true);
+          return;
+        }
+        try {
+          if (window.tizen && window.tizen.application) {
+            window.tizen.application.getCurrentApplication().exit();
+          }
+        } catch (err) {}
+        return;
+      }
+
+      // 5. Directional D-Pad Navigation (PREVENT DEFAULT TO STOP NATIVE BROWSER SCROLLING)
+      if (isLeft) { e.preventDefault(); moveFocusSpatial("left"); return; }
+      if (isRight) { e.preventDefault(); moveFocusSpatial("right"); return; }
+      if (isUp) { e.preventDefault(); moveFocusSpatial("up"); return; }
+      if (isDown) { e.preventDefault(); moveFocusSpatial("down"); return; }
+
+      // 6. OK / Enter Button
+      if (isEnter) {
+        e.preventDefault();
+        var target = state.focusedEl;
+        if (target && target._onClick) {
+          target._onClick(target);
+        } else if (target) {
+          target.click();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+  }
+
+  // --- Views Rendering ---
   function init() {
+    initTizenKeys();
+    initGlobalKeyListeners();
     renderTopTabs();
     MovieBoxPlayer.init();
-    bindRemoteKeys();
     switchTab(0);
   }
 
@@ -92,8 +495,9 @@ var MovieBoxApp = (function () {
     nav.innerHTML = "";
     TABS.forEach(function (name, idx) {
       var tab = document.createElement("div");
-      tab.className = "nav-tab focusable" + (idx === activeTab ? " active" : "");
+      tab.className = "nav-tab focusable" + (idx === state.currentTab ? " active" : "");
       tab.textContent = name;
+      tab.dataset.tabIdx = String(idx);
       makeFocusable(tab, function () {
         switchTab(idx);
       });
@@ -110,7 +514,7 @@ var MovieBoxApp = (function () {
   }
 
   function switchTab(idx) {
-    activeTab = idx;
+    state.currentTab = idx;
     var tabs = document.querySelectorAll(".nav-tab");
     tabs.forEach(function (t, i) {
       t.classList.toggle("active", i === idx);
@@ -127,7 +531,7 @@ var MovieBoxApp = (function () {
     else if (idx === 5) renderSettingsView(page);
   }
 
-  // --- 1. Home View (Hero Spotlight + Media Rows) ---
+  // --- 1. Home View ---
   function renderHomeView(container) {
     toast("Loading MovieBox Morphe Spotlight…");
 
@@ -144,7 +548,7 @@ var MovieBoxApp = (function () {
       var scifi = results[3] || [];
       var anime = results[4] || [];
 
-      // Hero Spotlight (from Top Trending Movie)
+      // Hero Spotlight
       if (movies.length > 0) {
         var heroMeta = movies[0];
         var hero = document.createElement("div");
@@ -172,7 +576,7 @@ var MovieBoxApp = (function () {
           '</div>' +
           '<p class="hero-desc">' + (heroMeta.description || "Stream blockbusters in full HD ad-free on your TV.") + '</p>' +
           '<div class="hero-btns">' +
-            '<div id="hero-play-btn" class="action-btn primary focusable">▶ Watch Now</div>' +
+            '<div id="hero-play-btn" class="action-btn primary focusable">▶ Watch Now (1080p)</div>' +
             '<div id="hero-info-btn" class="action-btn focusable">ℹ Detail &amp; Servers</div>' +
           '</div>';
 
@@ -201,9 +605,14 @@ var MovieBoxApp = (function () {
       createMediaRow(container, "🚀 Sci-Fi &amp; Future Worlds", scifi);
       createMediaRow(container, "🎌 Anime &amp; Animation", anime);
 
-      // Focus first actionable button
+      // Focus first actionable button immediately!
       var firstBtn = container.querySelector(".hero-btns .focusable");
-      if (firstBtn) setFocus(firstBtn);
+      if (firstBtn) {
+        setFocus(firstBtn, true);
+      } else {
+        var topTab = document.querySelector(".nav-tab.active");
+        if (topTab) setFocus(topTab, false);
+      }
     });
   }
 
@@ -242,7 +651,7 @@ var MovieBoxApp = (function () {
     container.appendChild(sec);
   }
 
-  // --- 2. Catalog View (Movies / Series Grid) ---
+  // --- 2. Catalog View ---
   function renderCatalogView(container, type) {
     var isSeries = type === "series";
     var heading = document.createElement("div");
@@ -250,7 +659,6 @@ var MovieBoxApp = (function () {
     heading.innerHTML = "<h1 style='font-size:38px;font-weight:800;'>" + (isSeries ? "📺 TV Series Catalog" : "🍿 Movies Catalog") + "</h1>";
     container.appendChild(heading);
 
-    // Genre Filter Pills
     var genreRow = document.createElement("div");
     genreRow.className = "h-row";
     genreRow.style.padding = "10px 60px 20px 60px";
@@ -306,14 +714,14 @@ var MovieBoxApp = (function () {
         });
 
         var first = grid.querySelector(".focusable");
-        if (first) setFocus(first);
+        if (first) setFocus(first, true);
       });
     }
 
     loadGrid(null);
   }
 
-  // --- 3. Search View (On-Screen TV Keyboard) ---
+  // --- 3. Search View ---
   function renderSearchView(container) {
     var wrap = document.createElement("div");
     wrap.className = "search-container";
@@ -325,7 +733,6 @@ var MovieBoxApp = (function () {
     inputDisplay.innerHTML = "<span>🔍</span><span id='search-text' style='color:#ffb800;'>Type movie or show title…</span>";
     wrap.appendChild(inputDisplay);
 
-    // TV Remote Friendly Keyboard
     var kb = document.createElement("div");
     kb.className = "tv-keyboard";
 
@@ -405,10 +812,10 @@ var MovieBoxApp = (function () {
     }
 
     var firstKey = kb.querySelector(".focusable");
-    if (firstKey) setFocus(firstKey);
+    if (firstKey) setFocus(firstKey, true);
   }
 
-  // --- 4. My List / Watchlist View ---
+  // --- 4. My List View ---
   function renderMyListView(container) {
     var wrap = document.createElement("div");
     wrap.style.padding = "40px 60px";
@@ -418,6 +825,8 @@ var MovieBoxApp = (function () {
     if (!list || list.length === 0) {
       wrap.innerHTML += "<p style='color:#888;font-size:22px;margin-top:40px;'>Your watchlist is empty. Press '+ Watchlist' on any movie or series to save it here.</p>";
       container.appendChild(wrap);
+      var topTab = document.querySelector(".nav-tab.active");
+      if (topTab) setFocus(topTab, false);
       return;
     }
 
@@ -446,10 +855,10 @@ var MovieBoxApp = (function () {
     container.appendChild(wrap);
 
     var first = grid.querySelector(".focusable");
-    if (first) setFocus(first);
+    if (first) setFocus(first, true);
   }
 
-  // --- 5. Settings View (Morphe VIP Unlocked) ---
+  // --- 5. Settings View ---
   function renderSettingsView(container) {
     var wrap = document.createElement("div");
     wrap.style.padding = "40px 60px";
@@ -502,18 +911,21 @@ var MovieBoxApp = (function () {
     });
 
     var first = wrap.querySelector(".focusable");
-    if (first) setFocus(first);
+    if (first) setFocus(first, true);
   }
 
-  // --- Detail & Episode Modal ---
+  // --- Detail Modal ---
   function openDetailModal(id, type) {
+    state.preModalFocusEl = state.focusedEl;
+    state.modalOpen = true;
+
     toast("Loading details…");
     MovieBoxCatalog.getDetail(type, id).then(function (meta) {
       if (!meta) {
         toast("Failed to load details");
+        state.modalOpen = false;
         return;
       }
-      currentDetailMeta = meta;
 
       var modal = el("detail-modal");
       el("detail-backdrop-art").style.backgroundImage = "url('" + (meta.background || meta.poster) + "')";
@@ -525,7 +937,6 @@ var MovieBoxApp = (function () {
       el("detail-genres").textContent = (meta.genres || []).join(" · ");
       el("detail-overview").textContent = meta.description || "";
 
-      // Actions
       var actBox = el("detail-actions");
       actBox.innerHTML = "";
 
@@ -533,7 +944,7 @@ var MovieBoxApp = (function () {
       playBtn.className = "action-btn primary focusable";
       playBtn.innerHTML = "▶ Play Now (1080p)";
       makeFocusable(playBtn, function () {
-        modal.classList.remove("open");
+        closeModal();
         MovieBoxPlayer.open(meta, 0);
       });
       actBox.appendChild(playBtn);
@@ -553,11 +964,10 @@ var MovieBoxApp = (function () {
       closeBtn.className = "action-btn focusable";
       closeBtn.innerHTML = "✕ Close";
       makeFocusable(closeBtn, function () {
-        modal.classList.remove("open");
+        closeModal();
       });
       actBox.appendChild(closeBtn);
 
-      // TV Series Episodes
       var seriesBox = el("detail-series-box");
       if (type === "series" && meta.videos && meta.videos.length > 0) {
         seriesBox.style.display = "block";
@@ -567,7 +977,7 @@ var MovieBoxApp = (function () {
       }
 
       modal.classList.add("open");
-      setFocus(playBtn);
+      setFocus(playBtn, true);
     });
   }
 
@@ -609,7 +1019,7 @@ var MovieBoxApp = (function () {
           '<div class="ep-title">' + (ep.name || ep.title || ("Episode " + ep.episode)) + '</div>';
 
         makeFocusable(card, function () {
-          el("detail-modal").classList.remove("open");
+          closeModal();
           var clone = Object.assign({}, mMeta, {
             season: sNum,
             episode: ep.episode,
@@ -624,78 +1034,6 @@ var MovieBoxApp = (function () {
     renderEpisodesForSeason(meta, seasons[activeSeason] || [], activeSeason);
   }
 
-  // --- Remote Key Bindings ---
-  function bindRemoteKeys() {
-    window.addEventListener("keydown", function (e) {
-      var code = e.keyCode || e.which;
-
-      // Handle Color Buttons on Samsung TV Remote
-      if (code === 403 || e.key === "ColorF0Red") {
-        e.preventDefault();
-        switchTab(3); // Search
-        return;
-      }
-      if (code === 406 || e.key === "ColorF3Blue") {
-        e.preventDefault();
-        switchTab(4); // My List
-        return;
-      }
-
-      // Handle Player Keys
-      if (el("player-layer").classList.contains("open")) {
-        if (code === 10009 || code === 27 || e.key === "Escape") {
-          e.preventDefault();
-          MovieBoxPlayer.close();
-          return;
-        }
-        if (code === 415 || code === 19 || e.key === "MediaPlay" || e.key === "MediaPause" || e.key === "MediaPlayPause") {
-          e.preventDefault();
-          MovieBoxPlayer.togglePlay();
-          return;
-        }
-        if (code === 37 || e.key === "ArrowLeft") {
-          MovieBoxPlayer.seek(-10);
-          return;
-        }
-        if (code === 39 || e.key === "ArrowRight") {
-          MovieBoxPlayer.seek(10);
-          return;
-        }
-        if (code === 38 || code === 40) {
-          MovieBoxPlayer.showOsd();
-          return;
-        }
-        return;
-      }
-
-      // Handle Modal Back Key
-      if (el("detail-modal").classList.contains("open") || el("list-modal").classList.contains("open")) {
-        if (code === 10009 || code === 27 || e.key === "Escape") {
-          e.preventDefault();
-          el("detail-modal").classList.remove("open");
-          el("list-modal").classList.remove("open");
-          return;
-        }
-      }
-
-      // Handle Browser Back Key
-      if (el("browser-layer").classList.contains("open")) {
-        if (code === 10009 || code === 27 || e.key === "Escape") {
-          e.preventDefault();
-          el("browser-layer").classList.remove("open");
-          el("browser-iframe").src = "about:blank";
-          return;
-        }
-      }
-    });
-
-    // In-App Browser Back Button
-    el("browser-back-btn").addEventListener("click", function () {
-      el("browser-layer").classList.remove("open");
-      el("browser-iframe").src = "about:blank";
-    });
-  }
-
   return {
     init: init,
     toast: toast,
@@ -704,7 +1042,6 @@ var MovieBoxApp = (function () {
   };
 })();
 
-// Bootstrap on DOM ready
 document.addEventListener("DOMContentLoaded", function () {
   MovieBoxApp.init();
 });
