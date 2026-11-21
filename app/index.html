@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>MovieBox — Morphe Edition (Samsung Tizen TV)</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Hardware video playback engines for Tizen WebEngine -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
+</head>
+<body>
+  <!-- Main 10-Foot TV Shell -->
+  <div id="app-root">
+    <!-- Top Bar Navigation -->
+    <header id="top-bar">
+      <div id="app-brand" class="focusable" tabindex="0">
+        <span class="brand-title">MOVIEBOX</span>
+        <span class="brand-badge">MORPHE VIP</span>
+      </div>
+      <nav id="nav-tabs"></nav>
+      <div class="top-spacer"></div>
+      <div id="top-search-trigger" class="focusable" tabindex="0">
+        <span class="search-icon">🔍</span>
+        <span class="search-label">Search (Red)</span>
+      </div>
+    </header>
+
+    <!-- Main View Scroll Area -->
+    <main id="main-scroll">
+      <div id="page-content"></div>
+    </main>
+  </div>
+
+  <!-- Detail / Season & Episode Modal Overlay -->
+  <div id="detail-modal" class="modal-layer">
+    <div id="detail-backdrop-art"></div>
+    <div id="detail-backdrop-grad"></div>
+    <div id="detail-container">
+      <div id="detail-poster-wrap">
+        <img id="detail-poster" src="" alt="Poster" />
+      </div>
+      <div id="detail-meta">
+        <h1 id="detail-title"></h1>
+        <div id="detail-badges">
+          <span id="detail-rating" class="meta-pill gold">⭐ 8.5</span>
+          <span id="detail-year" class="meta-pill">2026</span>
+          <span id="detail-runtime" class="meta-pill">124m</span>
+          <span id="detail-quality" class="meta-pill green">1080p FHD</span>
+          <span id="detail-vip" class="meta-pill vip">VIP UNLOCKED</span>
+        </div>
+        <p id="detail-genres" class="meta-sub"></p>
+        <p id="detail-overview" class="meta-overview"></p>
+
+        <!-- Primary Action Buttons -->
+        <div id="detail-actions" class="action-row"></div>
+
+        <!-- TV Series Episode Drawer (Shown when type === 'series') -->
+        <div id="detail-series-box" style="display: none;">
+          <div id="season-tabs" class="h-row"></div>
+          <div id="episodes-list" class="h-row"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Native Fullscreen Hardware Video Player -->
+  <div id="player-layer" class="fullscreen-layer">
+    <div id="player-video-wrap">
+      <video id="player-video" preload="auto" playsinline></video>
+      <div id="player-subtitles-box"></div>
+    </div>
+
+    <!-- Player Controls Overlay (OSD) -->
+    <div id="player-osd">
+      <div id="osd-top">
+        <div id="osd-back-btn" class="osd-btn focusable" tabindex="0">← Back</div>
+        <div id="osd-title-wrap">
+          <span id="osd-title">Title</span>
+          <span id="osd-subtitle" class="dim">S01E01</span>
+        </div>
+        <div class="osd-spacer"></div>
+        <div id="osd-server-badge" class="osd-badge vip">VIP 1080p</div>
+      </div>
+
+      <div class="osd-center"></div>
+
+      <div id="osd-bottom">
+        <div id="osd-progress-row">
+          <span id="osd-cur-time" class="time-label">00:00</span>
+          <div id="osd-seekbar" class="focusable" tabindex="0">
+            <div id="osd-seek-buffered"></div>
+            <div id="osd-seek-played"></div>
+            <div id="osd-seek-thumb"></div>
+          </div>
+          <span id="osd-dur-time" class="time-label">00:00</span>
+        </div>
+
+        <div id="osd-chips-row">
+          <div id="pchip-play" class="pchip focusable" tabindex="0">⏸ Pause</div>
+          <div id="pchip-quality" class="pchip focusable" tabindex="0">
+            <span>📺 Quality: </span><b class="pchip-val">1080p</b>
+          </div>
+          <div id="pchip-subs" class="pchip focusable" tabindex="0">
+            <span>💬 Subs: </span><b class="pchip-val">Arabic / English</b>
+          </div>
+          <div id="pchip-server" class="pchip focusable" tabindex="0">
+            <span>⚡ Server: </span><b class="pchip-val">VIP 1</b>
+          </div>
+          <div id="pchip-audio" class="pchip focusable" tabindex="0">
+            <span>🔊 Audio: </span><b class="pchip-val">Default</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-App Embed Browser Layer (Fallback Player) -->
+  <div id="browser-layer" class="fullscreen-layer">
+    <div id="browser-topbar">
+      <div id="browser-back-btn" class="browser-btn focusable" tabindex="0">← Back to MovieBox</div>
+      <div id="browser-site-title">MovieBox Embed Player</div>
+      <div class="browser-spacer"></div>
+      <div id="browser-pointer-btn" class="browser-btn accent focusable" tabindex="0">🖱 Pointer (Green)</div>
+      <div id="browser-reload-btn" class="browser-btn focusable" tabindex="0">↻ Reload</div>
+    </div>
+    <div id="browser-frame-wrap">
+      <iframe
+        id="browser-iframe"
+        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+        allowfullscreen
+        referrerpolicy="origin"
+        src="about:blank"
+      ></iframe>
+    </div>
+  </div>
+
+  <!-- Virtual D-pad Pointer Dot for In-App Browser -->
+  <div id="virtual-pointer"></div>
+
+  <!-- Generic List / Selection Modal -->
+  <div id="list-modal" class="modal-layer">
+    <div class="list-modal-box">
+      <h2 id="list-modal-title">Select Option</h2>
+      <div id="list-modal-items" class="v-list"></div>
+      <div id="list-modal-close" class="action-btn focusable" tabindex="0">Cancel</div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast"></div>
+
+  <!-- Scripts -->
+  <script src="assets/roles.js"></script>
+  <script src="assets/spatnav.js"></script>
+  <script src="js/catalog.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
