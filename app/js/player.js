@@ -310,17 +310,27 @@ var MovieBoxPlayer = (function () {
         if (state.levels.length > 0) {
           var targetLevel = state.levels.length - 1;
           for (var i = state.levels.length - 1; i >= 0; i--) {
-            if (state.levels[i].height >= 1080) {
+            var lvl = state.levels[i];
+            var w = lvl.width || 0;
+            var h = lvl.height || 0;
+            // Matches 1080p 16:9 (1920x1080) and Cinemascope 2.39:1 (1920x802, 1920x800)
+            if (h >= 1000 || w >= 1900 || (w >= 1800 && h >= 750)) {
               targetLevel = i;
               break;
             }
           }
           hls.currentLevel = targetLevel;
-          var h = state.levels[targetLevel].height || 1080;
+          var curLvl = state.levels[targetLevel];
+          var curH = curLvl.height || 1080;
+          var curW = curLvl.width || 1920;
+          var qTag = (curW >= 3800 || curH >= 2100) ? "4K UHD ✓" :
+                     (curW >= 1900 || curH >= 1000 || (curW >= 1800 && curH >= 750)) ? "1080p FHD ✓" :
+                     (curW >= 1200 || curH >= 700) ? "720p HD ✓" :
+                     (curH + "p ✓");
           var qVal = el("pchip-quality");
           if (qVal) {
             var valEl = qVal.querySelector(".pchip-val");
-            if (valEl) valEl.textContent = h + "p FHD ✓";
+            if (valEl) valEl.textContent = qTag;
           }
         }
 
@@ -491,9 +501,13 @@ var MovieBoxPlayer = (function () {
 
     if (state.levels && state.levels.length > 0) {
       state.levels.forEach(function (lvl, idx) {
-        var h = lvl.height || 1080;
+        var h = lvl.height || 720;
+        var w = lvl.width || 1280;
         var isCurrent = (hls && hls.currentLevel === idx);
-        var qTag = h >= 2160 ? "4K UHD" : (h + "p " + (h >= 1080 ? "FHD" : "HD"));
+        var qTag = (w >= 3800 || h >= 2100) ? "4K UHD" :
+                   (w >= 1900 || h >= 1000 || (w >= 1800 && h >= 750)) ? "1080p FHD" :
+                   (w >= 1200 || h >= 700) ? "720p HD" :
+                   (h + "p");
         items.push({
           label: qTag + (isCurrent ? " ✓" : ""),
           action: function () {
@@ -501,9 +515,9 @@ var MovieBoxPlayer = (function () {
             var qVal = el("pchip-quality");
             if (qVal) {
               var valEl = qVal.querySelector(".pchip-val");
-              if (valEl) valEl.textContent = h + "p FHD ✓";
+              if (valEl) valEl.textContent = qTag + " ✓";
             }
-            say("Quality locked to " + h + "p");
+            say("Quality locked to " + qTag);
           }
         });
       });

@@ -314,23 +314,110 @@ var server = http.createServer(function (req, res) {
 
         function resolveStreams(finalId) {
             var streams = [];
+            var pending = 3;
+            var isTv = (rType === 'series');
+            var VP_KEY = 'f3b72e73c80c9a996574379798703796a1936efa3516a7105cb0e43048b46b5a';
 
-            // Provider 1: VixSrc HD
-            var vixUrl = rType === 'series'
+            function checkDone() {
+                pending--;
+                if (pending <= 0) {
+                    streams.sort(function (a, b) {
+                        return (a.order || 99) - (b.order || 99);
+                    });
+                    return sendJson(res, 200, {
+                        ok: streams.length > 0,
+                        tmdb: finalId,
+                        imdb: rImdb,
+                        url: streams.length > 0 ? streams[0].url : "",
+                        streams: streams
+                    });
+                }
+            }
+
+            // 1. VIP Server 1: VidPrime Helix (Native 1080p FHD)
+            var p1Path = isTv ? ('/v1/tv/' + finalId + '/' + rSeason + '/' + rEpisode + '?source=x9pv')
+                              : ('/v1/movie/' + finalId + '?source=x9pv');
+            var p1Ref = isTv ? ('https://vidprime.top/tv/' + finalId + '/' + rSeason + '/' + rEpisode)
+                             : ('https://vidprime.top/movie/' + finalId);
+
+            fetchBuffer('https://vidprime.top/api/vidora' + p1Path, {
+                headers: { 'x-player-key': VP_KEY },
+                referer: p1Ref,
+                ua: CHROME_UA,
+                timeout: 7000
+            }, function (err, buf) {
+                if (!err && buf) {
+                    try {
+                        var j = JSON.parse(buf.toString('utf8'));
+                        if (j && j.result && j.sources && j.sources[0] && j.sources[0].url) {
+                            var m3u8 = j.sources[0].url;
+                            streams.push({
+                                order: 1,
+                                server: "VIP Server 1 (1080p FHD)",
+                                label: "MovieBox Ultra 1080p FHD (Helix)",
+                                quality: "1080p",
+                                url: 'http://' + reqHost + '/proxy/stream?url=' + encodeURIComponent(m3u8) +
+                                     '&ref=' + encodeURIComponent('https://vidprime.top/') +
+                                     '&origin=' + encodeURIComponent('https://vidprime.top'),
+                                rawUrl: m3u8,
+                                referer: "https://vidprime.top/",
+                                origin: "https://vidprime.top"
+                            });
+                        }
+                    } catch (e) {}
+                }
+                checkDone();
+            });
+
+            // 2. VIP Server 2: VidPrime Orion (Native 1080p FHD)
+            var p2Path = isTv ? ('/v1/tv/' + finalId + '/' + rSeason + '/' + rEpisode + '?source=w7dn')
+                              : ('/v1/movie/' + finalId + '?source=w7dn');
+
+            fetchBuffer('https://vidprime.top/api/vidora' + p2Path, {
+                headers: { 'x-player-key': VP_KEY },
+                referer: p1Ref,
+                ua: CHROME_UA,
+                timeout: 7000
+            }, function (err, buf) {
+                if (!err && buf) {
+                    try {
+                        var j = JSON.parse(buf.toString('utf8'));
+                        if (j && j.result && j.sources && j.sources[0] && j.sources[0].url) {
+                            var m3u8 = j.sources[0].url;
+                            streams.push({
+                                order: 2,
+                                server: "VIP Server 2 (1080p FHD)",
+                                label: "MovieBox Fast 1080p FHD (Orion)",
+                                quality: "1080p",
+                                url: 'http://' + reqHost + '/proxy/stream?url=' + encodeURIComponent(m3u8) +
+                                     '&ref=' + encodeURIComponent('https://vidprime.top/') +
+                                     '&origin=' + encodeURIComponent('https://vidprime.top'),
+                                rawUrl: m3u8,
+                                referer: "https://vidprime.top/",
+                                origin: "https://vidprime.top"
+                            });
+                        }
+                    } catch (e) {}
+                }
+                checkDone();
+            });
+
+            // 3. VIP Server 3: VixSrc HD (720p Backup)
+            var vixUrl = isTv
                 ? ('https://vixsrc.to/api/tv/' + encodeURIComponent(finalId) + '/' + rSeason + '/' + rEpisode)
                 : ('https://vixsrc.to/api/movie/' + encodeURIComponent(finalId));
-            var vixRef = rType === 'series'
+            var vixRef = isTv
                 ? ('https://vixsrc.to/tv/' + finalId + '/' + rSeason + '/' + rEpisode)
                 : ('https://vixsrc.to/movie/' + finalId);
 
-            fetchBuffer(vixUrl, { referer: vixRef, ua: CHROME_UA, timeout: 8000 }, function (err1, buf1, status1, headers1) {
+            fetchBuffer(vixUrl, { referer: vixRef, ua: CHROME_UA, timeout: 7000 }, function (err1, buf1, status1, headers1) {
                 if (!err1 && buf1) {
                     try {
                         var j1 = JSON.parse(buf1.toString('utf8'));
                         if (j1 && j1.src) {
                             var cookies = (headers1 && headers1['set-cookie'] || []).map(function (c) { return c.split(';')[0]; }).join('; ');
                             var embedUrl = urlModule.resolve('https://vixsrc.to', j1.src);
-                            fetchBuffer(embedUrl, { referer: vixRef, cookie: cookies, ua: CHROME_UA, timeout: 8000 }, function (err2, buf2) {
+                            fetchBuffer(embedUrl, { referer: vixRef, cookie: cookies, ua: CHROME_UA, timeout: 7000 }, function (err2, buf2) {
                                 if (!err2 && buf2) {
                                     var html = buf2.toString('utf8');
                                     var tok = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
@@ -342,35 +429,25 @@ var server = http.createServer(function (req, res) {
                                                         '&ref=' + encodeURIComponent('https://vixsrc.to/') +
                                                         '&origin=' + encodeURIComponent('https://vixsrc.to');
                                         streams.push({
-                                            server: "VIP Server 1",
-                                            label: "MovieBox Direct FHD 1080p (Native)",
-                                            quality: "1080p",
+                                            order: 3,
+                                            server: "VIP Server 3 (720p HD)",
+                                            label: "MovieBox Backup 720p (VixSrc)",
+                                            quality: "720p",
                                             url: proxyM3u8,
                                             rawUrl: m3u8,
                                             referer: "https://vixsrc.to/",
-                                            origin: "https://vixsrc.to",
-                                            headers: { Referer: "https://vixsrc.to/", Origin: "https://vixsrc.to" }
+                                            origin: "https://vixsrc.to"
                                         });
                                     }
                                 }
-                                finishResponse();
+                                checkDone();
                             });
                             return;
                         }
                     } catch (e) {}
                 }
-                finishResponse();
+                checkDone();
             });
-
-            function finishResponse() {
-                return sendJson(res, 200, {
-                    ok: streams.length > 0,
-                    tmdb: finalId,
-                    imdb: rImdb,
-                    url: streams.length > 0 ? streams[0].url : "",
-                    streams: streams
-                });
-            }
         }
 
         if (rTmdb) {
