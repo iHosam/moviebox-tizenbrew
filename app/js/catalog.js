@@ -530,3 +530,7 @@ var MovieBoxCatalog = (function () {
     }
   };
 })();
+
+if (typeof window !== "undefined") {
+  window.MovieBoxCatalog = MovieBoxCatalog;
+}

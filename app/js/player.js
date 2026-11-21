@@ -794,3 +794,7 @@ var MovieBoxPlayer = (function () {
     handleKeyDown: handleKeyDown
   };
 })();
+
+if (typeof window !== "undefined") {
+  window.MovieBoxPlayer = MovieBoxPlayer;
+}

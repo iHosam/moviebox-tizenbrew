@@ -1,11 +1,11 @@
 {
   "name": "moviebox-tizen",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "MovieBox Morphe Edition for Samsung Tizen TV (TizenBrew) - Ad-Free VIP 1080p Streaming Hub for Movies & Series",
-  "main": "app/index.html",
+  "main": "app/index.html?v=1.4.2",
   "packageType": "app",
   "appName": "MovieBox",
-  "appPath": "app/index.html",
+  "appPath": "app/index.html?v=1.4.2",
   "serviceFile": "service/service.js",
   "evaluateScriptOnDocumentStart": false,
   "keys": [

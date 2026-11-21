@@ -20,6 +20,7 @@ var MovieBoxApp = (function () {
   var TABS = ["Home", "Movies", "Series", "Search", "My List", "Settings"];
 
   var state = {
+    initialized: false,
     currentTab: 0,
     focusedEl: null,
     lastPageFocusEl: null,
@@ -45,17 +46,19 @@ var MovieBoxApp = (function () {
 
   // --- Samsung Tizen TV Input Key Registration ---
   function initTizenKeys() {
-    if (window.tizen && window.tizen.tvinputdevice) {
-      var keys = [
-        "ColorF0Red", "ColorF1Green", "ColorF2Yellow", "ColorF3Blue",
-        "MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop",
-        "MediaFastForward", "MediaRewind", "MediaTrackNext", "MediaTrackPrevious",
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
-        "Info"
-      ];
-      keys.forEach(function (k) {
-        try { window.tizen.tvinputdevice.registerKey(k); } catch (e) {}
-      });
+    try {
+      if (typeof window !== "undefined" && window.tizen && window.tizen.tvinputdevice) {
+        var keys = [
+          "ColorF0Red", "ColorF1Green", "ColorF2Yellow", "ColorF3Blue",
+          "MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop",
+          "MediaFastForward", "MediaRewind", "MediaTrackNext", "MediaTrackPrevious"
+        ];
+        keys.forEach(function (k) {
+          try { window.tizen.tvinputdevice.registerKey(k); } catch (e) {}
+        });
+      }
+    } catch (e) {
+      console.warn("Tizen key registration warning:", e);
     }
   }
 
@@ -486,11 +489,14 @@ var MovieBoxApp = (function () {
 
   // --- Views Rendering ---
   function init() {
-    initTizenKeys();
-    initGlobalKeyListeners();
-    renderTopTabs();
-    MovieBoxPlayer.init();
-    switchTab(0);
+    if (state.initialized) return;
+    state.initialized = true;
+
+    try { initTizenKeys(); } catch (e) { console.warn("Keys err:", e); }
+    try { initGlobalKeyListeners(); } catch (e) { console.error("Global key err:", e); }
+    try { renderTopTabs(); } catch (e) { console.error("Tabs err:", e); }
+    try { MovieBoxPlayer.init(); } catch (e) { console.error("Player init err:", e); }
+    try { switchTab(0); } catch (e) { console.error("switchTab err:", e); }
   }
 
   function renderTopTabs() {
@@ -1058,10 +1064,19 @@ var MovieBoxApp = (function () {
     init: init,
     toast: toast,
     showModal: showModal,
-    openDetailModal: openDetailModal
+    openDetailModal: openDetailModal,
+    switchTab: switchTab
   };
 })();
 
-document.addEventListener("DOMContentLoaded", function () {
+if (typeof window !== "undefined") {
+  window.MovieBoxApp = MovieBoxApp;
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", function () {
+    MovieBoxApp.init();
+  });
+} else {
   MovieBoxApp.init();
-});
+}
