@@ -19,7 +19,7 @@ var fs = require('fs');
 var path = require('path');
 var zlib = require('zlib');
 
-var PORT = 8087;
+var PORT = 8088;
 var DEFAULT_UA = "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 TV Safari/537.36";
 var CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -466,6 +466,10 @@ var server = http.createServer(function (req, res) {
 
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
+});
+
+server.on('error', function (err) {
+    console.error('MovieBox service error:', err.message);
 });
 
 server.listen(PORT, '127.0.0.1', function () {

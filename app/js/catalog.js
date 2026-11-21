@@ -4,7 +4,7 @@
  */
 var MovieBoxCatalog = (function () {
   var CINEMETA = "https://v3-cinemeta.strem.io";
-  var SERVICE_URL = "http://127.0.0.1:8087";
+  var SERVICE_URL = "http://127.0.0.1:8088";
 
   function getJson(url) {
     return fetch(url)
@@ -17,6 +17,156 @@ var MovieBoxCatalog = (function () {
         return null;
       });
   }
+
+  // Instant seed data for instant 0ms TV bootup
+  var SEED_MOVIES = [
+    {
+      id: "tt15239678",
+      name: "Dune: Part Two",
+      type: "movie",
+      year: "2024",
+      imdbRating: "8.5",
+      genres: ["Action", "Adventure", "Sci-Fi"],
+      poster: "https://images.metahub.space/poster/medium/tt15239678/img",
+      background: "https://images.metahub.space/background/medium/tt15239678/img",
+      description: "Paul Atreides unites with Chani and the Fremen while seeking revenge against the conspirators who destroyed his family."
+    },
+    {
+      id: "tt15398776",
+      name: "Oppenheimer",
+      type: "movie",
+      year: "2023",
+      imdbRating: "8.9",
+      genres: ["Biography", "Drama", "History"],
+      poster: "https://images.metahub.space/poster/medium/tt15398776/img",
+      background: "https://images.metahub.space/background/medium/tt15398776/img",
+      description: "The story of American scientist J. Robert Oppenheimer and his role in the development of the atomic bomb."
+    },
+    {
+      id: "tt9362722",
+      name: "Spider-Man: Across the Spider-Verse",
+      type: "movie",
+      year: "2023",
+      imdbRating: "8.6",
+      genres: ["Animation", "Action", "Adventure"],
+      poster: "https://images.metahub.space/poster/medium/tt9362722/img",
+      background: "https://images.metahub.space/background/medium/tt9362722/img",
+      description: "Miles Morales catapults across the Multiverse, where he encounters a team of Spider-People charged with protecting its very existence."
+    },
+    {
+      id: "tt1745960",
+      name: "Top Gun: Maverick",
+      type: "movie",
+      year: "2022",
+      imdbRating: "8.3",
+      genres: ["Action", "Drama"],
+      poster: "https://images.metahub.space/poster/medium/tt1745960/img",
+      background: "https://images.metahub.space/background/medium/tt1745960/img",
+      description: "After thirty years, Maverick is still pushing the envelope as a top naval aviator, training a detachment of graduates for a specialized mission."
+    },
+    {
+      id: "tt1877830",
+      name: "The Batman",
+      type: "movie",
+      year: "2022",
+      imdbRating: "7.8",
+      genres: ["Action", "Crime", "Drama"],
+      poster: "https://images.metahub.space/poster/medium/tt1877830/img",
+      background: "https://images.metahub.space/background/medium/tt1877830/img",
+      description: "When a sadistic serial killer begins murdering key political figures in Gotham, Batman is forced to investigate the city's hidden corruption."
+    },
+    {
+      id: "tt0816692",
+      name: "Interstellar",
+      type: "movie",
+      year: "2014",
+      imdbRating: "8.7",
+      genres: ["Adventure", "Drama", "Sci-Fi"],
+      poster: "https://images.metahub.space/poster/medium/tt0816692/img",
+      background: "https://images.metahub.space/background/medium/tt0816692/img",
+      description: "When Earth becomes uninhabitable in the future, a farmer and ex-NASA pilot, Joseph Cooper, is tasked to pilot a spacecraft to find a new planet for humans."
+    },
+    {
+      id: "tt1375666",
+      name: "Inception",
+      type: "movie",
+      year: "2010",
+      imdbRating: "8.8",
+      genres: ["Action", "Adventure", "Sci-Fi"],
+      poster: "https://images.metahub.space/poster/medium/tt1375666/img",
+      background: "https://images.metahub.space/background/medium/tt1375666/img",
+      description: "A thief who steals corporate secrets through the use of dream-sharing technology is given the inverse task of planting an idea into the mind of a C.E.O."
+    }
+  ];
+
+  var SEED_SERIES = [
+    {
+      id: "tt2788316",
+      name: "Shōgun",
+      type: "series",
+      year: "2024",
+      imdbRating: "8.7",
+      genres: ["Adventure", "Drama", "History"],
+      poster: "https://images.metahub.space/poster/medium/tt2788316/img",
+      background: "https://images.metahub.space/background/medium/tt2788316/img",
+      description: "When a mysterious European ship is found marooned in a nearby fishing village, Lord Yoshii Toranaga discovers secrets that could tip the scales of power."
+    },
+    {
+      id: "tt12637874",
+      name: "Fallout",
+      type: "series",
+      year: "2024",
+      imdbRating: "8.4",
+      genres: ["Action", "Adventure", "Drama"],
+      poster: "https://images.metahub.space/poster/medium/tt12637874/img",
+      background: "https://images.metahub.space/background/medium/tt12637874/img",
+      description: "In a future, post-apocalyptic Los Angeles, citizens must live in underground bunkers to protect themselves from radiation, mutants and bandits."
+    },
+    {
+      id: "tt3581920",
+      name: "The Last of Us",
+      type: "series",
+      year: "2023",
+      imdbRating: "8.7",
+      genres: ["Action", "Adventure", "Drama"],
+      poster: "https://images.metahub.space/poster/medium/tt3581920/img",
+      background: "https://images.metahub.space/background/medium/tt3581920/img",
+      description: "After a global pandemic destroys civilization, a hardened survivor takes charge of a 14-year-old girl who may be humanity's last hope."
+    },
+    {
+      id: "tt11126994",
+      name: "Arcane",
+      type: "series",
+      year: "2021",
+      imdbRating: "9.0",
+      genres: ["Animation", "Action", "Adventure"],
+      poster: "https://images.metahub.space/poster/medium/tt11126994/img",
+      background: "https://images.metahub.space/background/medium/tt11126994/img",
+      description: "Set in Utopian Piltover and the oppressed underground of Zaun, the story follows the origins of two iconic League champions."
+    },
+    {
+      id: "tt0903747",
+      name: "Breaking Bad",
+      type: "series",
+      year: "2008",
+      imdbRating: "9.5",
+      genres: ["Crime", "Drama", "Thriller"],
+      poster: "https://images.metahub.space/poster/medium/tt0903747/img",
+      background: "https://images.metahub.space/background/medium/tt0903747/img",
+      description: "A chemistry teacher diagnosed with lung cancer turns to manufacturing and selling methamphetamine to secure his family's financial future."
+    },
+    {
+      id: "tt4574334",
+      name: "Stranger Things",
+      type: "series",
+      year: "2016",
+      imdbRating: "8.7",
+      genres: ["Drama", "Fantasy", "Horror"],
+      poster: "https://images.metahub.space/poster/medium/tt4574334/img",
+      background: "https://images.metahub.space/background/medium/tt4574334/img",
+      description: "When a young boy vanishes, a small town uncovers a mystery involving secret experiments and terrifying supernatural forces."
+    }
+  ];
 
   // Curated Genre definitions
   var GENRES = [
@@ -47,17 +197,25 @@ var MovieBoxCatalog = (function () {
 
   return {
     GENRES: GENRES,
+    getSeedMovies: function () { return SEED_MOVIES; },
+    getSeedSeries: function () { return SEED_SERIES; },
 
     // 1. Trending / Featured Feeds
     getTrendingMovies: function () {
       return getJson(CINEMETA + "/catalog/movie/top.json").then(function (data) {
-        return (data && data.metas) || [];
+        var metas = (data && data.metas && data.metas.length > 0) ? data.metas : SEED_MOVIES;
+        return metas;
+      }).catch(function () {
+        return SEED_MOVIES;
       });
     },
 
     getTrendingSeries: function () {
       return getJson(CINEMETA + "/catalog/series/top.json").then(function (data) {
-        return (data && data.metas) || [];
+        var metas = (data && data.metas && data.metas.length > 0) ? data.metas : SEED_SERIES;
+        return metas;
+      }).catch(function () {
+        return SEED_SERIES;
       });
     },
 
@@ -65,7 +223,10 @@ var MovieBoxCatalog = (function () {
       var t = (type === "series" || type === "tv") ? "series" : "movie";
       var url = CINEMETA + "/catalog/" + t + "/top/genre=" + encodeURIComponent(genre) + ".json";
       return getJson(url).then(function (data) {
-        return (data && data.metas) || [];
+        var metas = (data && data.metas && data.metas.length > 0) ? data.metas : (t === "series" ? SEED_SERIES : SEED_MOVIES);
+        return metas;
+      }).catch(function () {
+        return t === "series" ? SEED_SERIES : SEED_MOVIES;
       });
     },
 
@@ -79,7 +240,16 @@ var MovieBoxCatalog = (function () {
       return Promise.all([mPromise, sPromise]).then(function (results) {
         var mList = (results[0] && results[0].metas) || [];
         var sList = (results[1] && results[1].metas) || [];
-        return mList.concat(sList);
+        var all = mList.concat(sList);
+        if (all.length === 0) {
+          // Local filter on seed data fallback
+          var lq = query.toLowerCase().trim();
+          var seedMatches = SEED_MOVIES.concat(SEED_SERIES).filter(function (it) {
+            return (it.name && it.name.toLowerCase().indexOf(lq) !== -1);
+          });
+          return seedMatches;
+        }
+        return all;
       });
     },
 
@@ -87,7 +257,13 @@ var MovieBoxCatalog = (function () {
     getDetail: function (type, id) {
       var t = (type === "series" || type === "tv") ? "series" : "movie";
       return getJson(CINEMETA + "/meta/" + t + "/" + encodeURIComponent(id) + ".json").then(function (data) {
-        return data && data.meta;
+        if (data && data.meta) return data.meta;
+        // Search in seed data
+        var seeds = (t === "series") ? SEED_SERIES : SEED_MOVIES;
+        for (var i = 0; i < seeds.length; i++) {
+          if (seeds[i].id === id) return seeds[i];
+        }
+        return null;
       });
     },
 
@@ -101,9 +277,9 @@ var MovieBoxCatalog = (function () {
                  "&s=" + s + "&e=" + e;
 
       return getJson(qUrl).then(function (res) {
-        if (res && res.ok) return res;
+        if (res && res.ok && res.streams && res.streams.length > 0) return res;
 
-        // Fallback: Construct Direct Multi-Server Embeds
+        // Construct Direct Multi-Server Embeds
         var id = imdbId || tmdbId;
         var embeds = [
           {
@@ -142,7 +318,7 @@ var MovieBoxCatalog = (function () {
 
         return {
           ok: true,
-          streams: [],
+          streams: (res && res.streams) || [],
           embeds: embeds
         };
       });
@@ -155,68 +331,60 @@ var MovieBoxCatalog = (function () {
 
     saveHistory: function (item) {
       var hist = loadStorage(STORAGE_KEY_HISTORY, []);
-      // Filter out existing by ID
       hist = hist.filter(function (h) { return h.id !== item.id; });
       hist.unshift({
         id: item.id,
-        type: item.type,
-        name: item.name,
-        poster: item.poster,
+        type: item.type || "movie",
+        name: item.name || "Untitled",
+        poster: item.poster || "",
         season: item.season || 1,
         episode: item.episode || 1,
         time: item.time || 0,
         duration: item.duration || 0,
-        updatedAt: Date.now()
+        timestamp: Date.now()
       });
-      if (hist.length > 50) hist = hist.slice(0, 50);
-      saveStorage(STORAGE_KEY_HISTORY, hist);
+      saveStorage(STORAGE_KEY_HISTORY, hist.slice(0, 40));
     },
 
     getWatchlist: function () {
       return loadStorage(STORAGE_KEY_WATCHLIST, []);
     },
 
-    toggleWatchlist: function (meta) {
-      var list = loadStorage(STORAGE_KEY_WATCHLIST, []);
-      var idx = -1;
-      for (var i = 0; i < list.length; i++) {
-        if (list[i].id === meta.id) {
-          idx = i;
-          break;
-        }
-      }
-      if (idx !== -1) {
-        list.splice(idx, 1);
-        saveStorage(STORAGE_KEY_WATCHLIST, list);
-        return false;
-      } else {
-        list.unshift({
-          id: meta.id,
-          type: meta.type || "movie",
-          name: meta.name,
-          poster: meta.poster,
-          year: meta.year,
-          imdbRating: meta.imdbRating
-        });
-        saveStorage(STORAGE_KEY_WATCHLIST, list);
-        return true;
-      }
+    isWatchlisted: function (id) {
+      var wl = loadStorage(STORAGE_KEY_WATCHLIST, []);
+      return wl.some(function (w) { return w.id === id; });
     },
 
-    isWatchlisted: function (id) {
-      var list = loadStorage(STORAGE_KEY_WATCHLIST, []);
-      for (var i = 0; i < list.length; i++) {
-        if (list[i].id === id) return true;
+    toggleWatchlist: function (item) {
+      var wl = loadStorage(STORAGE_KEY_WATCHLIST, []);
+      var idx = -1;
+      for (var i = 0; i < wl.length; i++) {
+        if (wl[i].id === item.id) { idx = i; break; }
       }
-      return false;
+      if (idx !== -1) {
+        wl.splice(idx, 1);
+        saveStorage(STORAGE_KEY_WATCHLIST, wl);
+        return false;
+      } else {
+        wl.unshift({
+          id: item.id,
+          type: item.type || "movie",
+          name: item.name,
+          poster: item.poster,
+          year: item.year,
+          imdbRating: item.imdbRating
+        });
+        saveStorage(STORAGE_KEY_WATCHLIST, wl.slice(0, 60));
+        return true;
+      }
     },
 
     // 6. Settings
     getSettings: function () {
       return loadStorage(STORAGE_KEY_SETTINGS, {
-        preferredQuality: "1080p", // Default to 1080p!
-        autoSelectHighest: true,
-        subLang: "ara,eng",
+        preferredQuality: "1080p",
+        subtitlesEnabled: true,
+        defaultSubLanguage: "ara",
         defaultServer: "VIP Server 1"
       });
     },

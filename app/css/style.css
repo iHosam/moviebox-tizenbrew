@@ -36,9 +36,10 @@ html, body {
 }
 
 .focusable.focused, .focusable:focus {
+  border-color: #ffffff !important;
   outline: 4px solid var(--accent-gold) !important;
-  outline-offset: 4px;
-  box-shadow: 0 0 24px var(--focus-glow) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(255, 184, 0, 0.7), 0 10px 24px rgba(0, 0, 0, 0.8) !important;
   transform: scale(1.05);
   z-index: 100;
 }

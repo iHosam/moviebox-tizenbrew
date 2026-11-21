@@ -1,8 +1,21 @@
 /**
  * MovieBox (Morphe Edition) — Main TV Application Controller
  * Provides complete 2D spatial D-pad navigation, Samsung remote keybindings,
- * catalog views, and modal management.
+ * immediate seed-backed catalog views, and modal management.
  */
+
+// Surface runtime errors on TV screen (since TV has no devtools)
+window.addEventListener("error", function (ev) {
+  try {
+    var box = document.getElementById("toast");
+    if (box) {
+      box.textContent = "Error: " + (ev && ev.message ? ev.message : "unknown") +
+        (ev && ev.filename ? " (" + String(ev.filename).split("/").pop() + ":" + ev.lineno + ")" : "");
+      box.classList.add("show");
+    }
+  } catch (e) {}
+});
+
 var MovieBoxApp = (function () {
   var TABS = ["Home", "Movies", "Series", "Search", "My List", "Settings"];
 
@@ -57,11 +70,11 @@ var MovieBoxApp = (function () {
   function isVisible(node) {
     if (!node || !isConnectedNode(node)) return false;
     if (node.style && node.style.display === "none") return false;
-    var rect = node.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    return true;
   }
 
   function makeFocusable(node, onClick, onLongPress) {
+    if (!node) return null;
     node.classList.add("focusable");
     node.tabIndex = 0;
     if (onClick) {
@@ -94,7 +107,7 @@ var MovieBoxApp = (function () {
       }
       state.modalFocusEl = node;
       node.classList.add("focused");
-      try { node.focus(); } catch (e) {}
+      try { node.focus({ preventScroll: true }); } catch (e) { try { node.focus(); } catch (e2) {} }
       if (scrollIntoView !== false) {
         try { node.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) {}
       }
@@ -106,7 +119,7 @@ var MovieBoxApp = (function () {
     }
     state.focusedEl = node;
     node.classList.add("focused");
-    try { node.focus(); } catch (e) {}
+    try { node.focus({ preventScroll: true }); } catch (e) { try { node.focus(); } catch (e2) {} }
 
     // Remember column index inside horizontal row (.h-row) for natural Up/Down traversal
     var hRow = node.closest ? node.closest(".h-row") : null;
@@ -259,7 +272,7 @@ var MovieBoxApp = (function () {
       }
     }
 
-    // If no element currently focused, focus first element of content or row 0
+    // If no element currently focused, focus first content button or top bar
     if (rIdx === -1) {
       var startRow = (!state.modalOpen && rows.length > 1) ? rows[1] : rows[0];
       return setFocus(startRow[0], true);
@@ -364,6 +377,9 @@ var MovieBoxApp = (function () {
   // --- Global Remote Keydown Handler ---
   function initGlobalKeyListeners() {
     function handleKeyDown(e) {
+      if (e.__mbHandled) return;
+      e.__mbHandled = true;
+
       var k = e.keyCode || e.which || 0;
       var key = e.key || "";
 
@@ -375,7 +391,7 @@ var MovieBoxApp = (function () {
       var isBack = (k === 10009 || k === 27 || k === 8 || key === "Escape" || key === "Backspace");
 
       // 1. If Video Player is open, delegate to MovieBoxPlayer
-      if (el("player-layer").classList.contains("open")) {
+      if (el("player-layer") && el("player-layer").classList.contains("open")) {
         if (isBack) {
           e.preventDefault();
           MovieBoxPlayer.close();
@@ -444,7 +460,7 @@ var MovieBoxApp = (function () {
           switchTab(0);
           return;
         }
-        // If on top bar on Home, ask to exit
+        // If on content inside Home, return focus to Top Bar
         var topBar = el("top-bar");
         if (topBar && state.focusedEl && !topBar.contains(state.focusedEl)) {
           var activeTabEl = document.querySelector(".nav-tab.active");
@@ -459,7 +475,7 @@ var MovieBoxApp = (function () {
         return;
       }
 
-      // 5. Directional D-Pad Navigation (PREVENT DEFAULT TO STOP NATIVE BROWSER SCROLLING)
+      // 5. Directional D-Pad Navigation (PREVENT DEFAULT ALWAYS TO STOP NATIVE BROWSER SCROLLING)
       if (isLeft) { e.preventDefault(); moveFocusSpatial("left"); return; }
       if (isRight) { e.preventDefault(); moveFocusSpatial("right"); return; }
       if (isUp) { e.preventDefault(); moveFocusSpatial("up"); return; }
@@ -533,8 +549,12 @@ var MovieBoxApp = (function () {
 
   // --- 1. Home View ---
   function renderHomeView(container) {
-    toast("Loading MovieBox Morphe Spotlight…");
+    // 1. Build initial layout INSTANTLY using seed data (0ms bootup)
+    var seedMovies = MovieBoxCatalog.getSeedMovies();
+    var seedSeries = MovieBoxCatalog.getSeedSeries();
+    buildHomeContent(container, seedMovies, seedSeries, seedMovies, seedMovies, seedSeries);
 
+    // 2. Fetch live updates in the background (non-blocking)
     Promise.all([
       MovieBoxCatalog.getTrendingMovies(),
       MovieBoxCatalog.getTrendingSeries(),
@@ -542,84 +562,134 @@ var MovieBoxApp = (function () {
       MovieBoxCatalog.getByGenre("movie", "Sci-Fi"),
       MovieBoxCatalog.getByGenre("series", "Animation")
     ]).then(function (results) {
-      var movies = results[0] || [];
-      var series = results[1] || [];
-      var action = results[2] || [];
-      var scifi = results[3] || [];
-      var anime = results[4] || [];
+      var liveMovies = results[0] || seedMovies;
+      var liveSeries = results[1] || seedSeries;
+      var liveAction = results[2] || seedMovies;
+      var liveScifi = results[3] || seedMovies;
+      var liveAnime = results[4] || seedSeries;
 
-      // Hero Spotlight
-      if (movies.length > 0) {
-        var heroMeta = movies[0];
-        var hero = document.createElement("div");
-        hero.className = "hero-spotlight";
-
-        var bg = document.createElement("img");
-        bg.className = "hero-backdrop";
-        bg.src = heroMeta.background || heroMeta.poster;
-        hero.appendChild(bg);
-
-        var vig = document.createElement("div");
-        vig.className = "hero-vignette";
-        hero.appendChild(vig);
-
-        var content = document.createElement("div");
-        content.className = "hero-content";
-        content.innerHTML =
-          '<span class="hero-tag">🔥 MORPHE SPOTLIGHT</span>' +
-          '<h1 class="hero-title">' + (heroMeta.name || "MovieBox Pick") + '</h1>' +
-          '<div class="hero-meta-row">' +
-            '<span class="meta-pill gold">⭐ ' + (heroMeta.imdbRating || "8.4") + '</span>' +
-            '<span class="meta-pill">' + (heroMeta.year || "2026") + '</span>' +
-            '<span class="meta-pill green">1080p FHD</span>' +
-            '<span class="meta-pill vip">VIP UNLOCKED</span>' +
-          '</div>' +
-          '<p class="hero-desc">' + (heroMeta.description || "Stream blockbusters in full HD ad-free on your TV.") + '</p>' +
-          '<div class="hero-btns">' +
-            '<div id="hero-play-btn" class="action-btn primary focusable">▶ Watch Now (1080p)</div>' +
-            '<div id="hero-info-btn" class="action-btn focusable">ℹ Detail &amp; Servers</div>' +
-          '</div>';
-
-        hero.appendChild(content);
-        container.appendChild(hero);
-
-        makeFocusable(content.querySelector("#hero-play-btn"), function () {
-          MovieBoxPlayer.open(heroMeta);
-        });
-
-        makeFocusable(content.querySelector("#hero-info-btn"), function () {
-          openDetailModal(heroMeta.id, "movie");
-        });
-      }
-
-      // Continue Watching Row (if any)
-      var hist = MovieBoxCatalog.getHistory();
-      if (hist && hist.length > 0) {
-        createMediaRow(container, "🕒 Continue Watching", hist);
-      }
-
-      // Curated Rows
-      createMediaRow(container, "🔥 Trending Movies", movies);
-      createMediaRow(container, "📺 Binge-Worthy TV Series", series);
-      createMediaRow(container, "💥 High-Octane Action", action);
-      createMediaRow(container, "🚀 Sci-Fi &amp; Future Worlds", scifi);
-      createMediaRow(container, "🎌 Anime &amp; Animation", anime);
-
-      // Focus first actionable button immediately!
-      var firstBtn = container.querySelector(".hero-btns .focusable");
-      if (firstBtn) {
-        setFocus(firstBtn, true);
-      } else {
-        var topTab = document.querySelector(".nav-tab.active");
-        if (topTab) setFocus(topTab, false);
-      }
+      // Update rows seamlessly without breaking currently focused element
+      updateHomeMediaRows(container, liveMovies, liveSeries, liveAction, liveScifi, liveAnime);
+    }).catch(function (e) {
+      console.warn("Live fetch failed, staying on seed catalog", e);
     });
   }
 
-  function createMediaRow(container, title, items) {
+  function buildHomeContent(container, movies, series, action, scifi, anime) {
+    container.innerHTML = "";
+
+    // Hero Spotlight
+    if (movies.length > 0) {
+      var heroMeta = movies[0];
+      var hero = document.createElement("div");
+      hero.className = "hero-spotlight";
+
+      var bg = document.createElement("img");
+      bg.className = "hero-backdrop";
+      bg.src = heroMeta.background || heroMeta.poster;
+      hero.appendChild(bg);
+
+      var vig = document.createElement("div");
+      vig.className = "hero-vignette";
+      hero.appendChild(vig);
+
+      var content = document.createElement("div");
+      content.className = "hero-content";
+      content.innerHTML =
+        '<span class="hero-tag">🔥 MORPHE SPOTLIGHT</span>' +
+        '<h1 class="hero-title">' + (heroMeta.name || "MovieBox Pick") + '</h1>' +
+        '<div class="hero-meta-row">' +
+          '<span class="meta-pill gold">⭐ ' + (heroMeta.imdbRating || "8.5") + '</span>' +
+          '<span class="meta-pill">' + (heroMeta.year || "2024") + '</span>' +
+          '<span class="meta-pill green">1080p FHD</span>' +
+          '<span class="meta-pill vip">VIP UNLOCKED</span>' +
+        '</div>' +
+        '<p class="hero-desc">' + (heroMeta.description || "Stream blockbusters in full HD ad-free on your TV.") + '</p>' +
+        '<div class="hero-btns">' +
+          '<div id="hero-play-btn" class="action-btn primary focusable">▶ Watch Now (1080p)</div>' +
+          '<div id="hero-info-btn" class="action-btn focusable">ℹ Detail &amp; Servers</div>' +
+        '</div>';
+
+      hero.appendChild(content);
+      container.appendChild(hero);
+
+      makeFocusable(content.querySelector("#hero-play-btn"), function () {
+        MovieBoxPlayer.open(heroMeta);
+      });
+
+      makeFocusable(content.querySelector("#hero-info-btn"), function () {
+        openDetailModal(heroMeta.id, "movie");
+      });
+    }
+
+    // Continue Watching Row (if any)
+    var hist = MovieBoxCatalog.getHistory();
+    if (hist && hist.length > 0) {
+      createMediaRow(container, "🕒 Continue Watching", hist);
+    }
+
+    // Curated Rows
+    createMediaRow(container, "🔥 Trending Movies", movies, "row-movies");
+    createMediaRow(container, "📺 Binge-Worthy TV Series", series, "row-series");
+    createMediaRow(container, "💥 High-Octane Action", action, "row-action");
+    createMediaRow(container, "🚀 Sci-Fi &amp; Future Worlds", scifi, "row-scifi");
+    createMediaRow(container, "🎌 Anime &amp; Animation", anime, "row-anime");
+
+    // Immediately focus the Hero Play button!
+    var firstBtn = container.querySelector("#hero-play-btn");
+    if (firstBtn) {
+      setFocus(firstBtn, false);
+    } else {
+      var topTab = document.querySelector(".nav-tab.active");
+      if (topTab) setFocus(topTab, false);
+    }
+  }
+
+  function updateHomeMediaRows(container, movies, series, action, scifi, anime) {
+    function refreshRow(rowId, items) {
+      var sec = container.querySelector("#" + rowId);
+      if (!sec) return;
+      var hRow = sec.querySelector(".h-row");
+      if (!hRow) return;
+      // If user currently has focus inside this row, don't destroy it
+      if (state.focusedEl && hRow.contains(state.focusedEl)) return;
+
+      hRow.innerHTML = "";
+      items.forEach(function (m) {
+        var card = createCardElement(m);
+        hRow.appendChild(card);
+      });
+    }
+
+    refreshRow("row-movies", movies);
+    refreshRow("row-series", series);
+    refreshRow("row-action", action);
+    refreshRow("row-scifi", scifi);
+    refreshRow("row-anime", anime);
+  }
+
+  function createCardElement(m) {
+    var card = document.createElement("div");
+    card.className = "media-card focusable";
+    card.innerHTML =
+      '<img src="' + (m.poster || "") + '" alt="' + (m.name || "") + '" loading="lazy" />' +
+      (m.imdbRating ? '<div class="media-card-badge">⭐ ' + m.imdbRating + '</div>' : '') +
+      '<div class="media-card-info">' +
+        '<div class="media-card-title">' + (m.name || "Untitled") + '</div>' +
+        '<div class="media-card-sub">' + (m.year || (m.type === "series" ? "TV Series" : "Movie")) + '</div>' +
+      '</div>';
+
+    makeFocusable(card, function () {
+      openDetailModal(m.id, m.type || "movie");
+    });
+    return card;
+  }
+
+  function createMediaRow(container, title, items, rowId) {
     if (!items || items.length === 0) return;
     var sec = document.createElement("section");
     sec.className = "media-section";
+    if (rowId) sec.id = rowId;
 
     var h2 = document.createElement("h2");
     h2.className = "section-title";
@@ -630,20 +700,7 @@ var MovieBoxApp = (function () {
     row.className = "h-row";
 
     items.forEach(function (m) {
-      var card = document.createElement("div");
-      card.className = "media-card focusable";
-      card.innerHTML =
-        '<img src="' + (m.poster || "") + '" alt="' + (m.name || "") + '" loading="lazy" />' +
-        (m.imdbRating ? '<div class="media-card-badge">⭐ ' + m.imdbRating + '</div>' : '') +
-        '<div class="media-card-info">' +
-          '<div class="media-card-title">' + (m.name || "Untitled") + '</div>' +
-          '<div class="media-card-sub">' + (m.year || (m.type === "series" ? "TV Series" : "Movie")) + '</div>' +
-        '</div>';
-
-      makeFocusable(card, function () {
-        openDetailModal(m.id, m.type || "movie");
-      });
-
+      var card = createCardElement(m);
       row.appendChild(card);
     });
 
@@ -689,36 +746,36 @@ var MovieBoxApp = (function () {
     container.appendChild(grid);
 
     function loadGrid(genre) {
-      grid.innerHTML = "<p style='color:#888;padding:40px;'>Loading " + (genre || "featured") + " titles…</p>";
+      // Load seed items immediately first
+      var seedItems = (isSeries ? MovieBoxCatalog.getSeedSeries() : MovieBoxCatalog.getSeedMovies());
+      renderGridItems(seedItems);
+
       var fetchPromise = genre
         ? MovieBoxCatalog.getByGenre(type, genre)
         : (isSeries ? MovieBoxCatalog.getTrendingSeries() : MovieBoxCatalog.getTrendingMovies());
 
       fetchPromise.then(function (items) {
-        grid.innerHTML = "";
-        (items || []).forEach(function (m) {
-          var card = document.createElement("div");
-          card.className = "media-card focusable";
-          card.innerHTML =
-            '<img src="' + (m.poster || "") + '" alt="' + (m.name || "") + '" loading="lazy" />' +
-            (m.imdbRating ? '<div class="media-card-badge">⭐ ' + m.imdbRating + '</div>' : '') +
-            '<div class="media-card-info">' +
-              '<div class="media-card-title">' + (m.name || "Untitled") + '</div>' +
-              '<div class="media-card-sub">' + (m.year || "") + '</div>' +
-            '</div>';
-
-          makeFocusable(card, function () {
-            openDetailModal(m.id, type);
-          });
-          grid.appendChild(card);
-        });
-
-        var first = grid.querySelector(".focusable");
-        if (first) setFocus(first, true);
+        if (items && items.length > 0) {
+          renderGridItems(items);
+        }
       });
     }
 
+    function renderGridItems(items) {
+      grid.innerHTML = "";
+      (items || []).forEach(function (m) {
+        var card = createCardElement(m);
+        grid.appendChild(card);
+      });
+
+      var first = grid.querySelector(".focusable");
+      if (first && (!state.focusedEl || !container.contains(state.focusedEl))) {
+        setFocus(first, true);
+      }
+    }
+
     loadGrid(null);
+    setFocus(allPill, false);
   }
 
   // --- 3. Search View ---
@@ -792,19 +849,7 @@ var MovieBoxApp = (function () {
             return;
           }
           results.forEach(function (m) {
-            var card = document.createElement("div");
-            card.className = "media-card focusable";
-            card.innerHTML =
-              '<img src="' + (m.poster || "") + '" alt="' + (m.name || "") + '" loading="lazy" />' +
-              (m.imdbRating ? '<div class="media-card-badge">⭐ ' + m.imdbRating + '</div>' : '') +
-              '<div class="media-card-info">' +
-                '<div class="media-card-title">' + (m.name || "Untitled") + '</div>' +
-                '<div class="media-card-sub">' + (m.year || "") + '</div>' +
-              '</div>';
-
-            makeFocusable(card, function () {
-              openDetailModal(m.id, m.type || "movie");
-            });
+            var card = createCardElement(m);
             resultsGrid.appendChild(card);
           });
         });
@@ -835,19 +880,7 @@ var MovieBoxApp = (function () {
     grid.style.padding = "20px 0";
 
     list.forEach(function (m) {
-      var card = document.createElement("div");
-      card.className = "media-card focusable";
-      card.innerHTML =
-        '<img src="' + (m.poster || "") + '" alt="' + (m.name || "") + '" loading="lazy" />' +
-        (m.imdbRating ? '<div class="media-card-badge">⭐ ' + m.imdbRating + '</div>' : '') +
-        '<div class="media-card-info">' +
-          '<div class="media-card-title">' + (m.name || "Untitled") + '</div>' +
-          '<div class="media-card-sub">' + (m.year || "") + '</div>' +
-        '</div>';
-
-      makeFocusable(card, function () {
-        openDetailModal(m.id, m.type || "movie");
-      });
+      var card = createCardElement(m);
       grid.appendChild(card);
     });
 
